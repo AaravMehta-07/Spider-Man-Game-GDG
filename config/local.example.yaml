@@ -1,0 +1,6 @@
+# Copy to local.yaml only for machine-specific overrides. local.yaml is ignored.
+game:
+  godot_executable: C:/path/to/Godot_v4.7-stable_win64.exe
+vision:
+  camera_id: 0
+

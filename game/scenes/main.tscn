@@ -1,0 +1,76 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://scripts/core/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/core/session_controller.gd" id="2_session"]
+[ext_resource type="Script" path="res://scripts/networking/udp_vision_receiver.gd" id="3_udp"]
+[ext_resource type="Script" path="res://scripts/environment/city_builder.gd" id="4_city"]
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="5_hud"]
+[ext_resource type="Script" path="res://scripts/audio/audio_manager.gd" id="6_audio"]
+[ext_resource type="Script" path="res://scripts/persistence/save_manager.gd" id="7_save"]
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 1
+background_color = Color(0.005, 0.012, 0.035, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.14, 0.2, 0.42, 1)
+ambient_light_energy = 0.75
+fog_enabled = true
+fog_light_color = Color(0.09, 0.13, 0.26, 1)
+fog_light_energy = 0.55
+fog_density = 0.008
+glow_enabled = true
+glow_intensity = 0.85
+glow_bloom = 0.2
+
+[node name="Main" type="Node"]
+script = ExtResource("1_main")
+
+[node name="SessionController" type="Node" parent="."]
+script = ExtResource("2_session")
+
+[node name="UdpVisionReceiver" type="Node" parent="."]
+script = ExtResource("3_udp")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="WorldRoot" type="Node3D" parent="."]
+
+[node name="City" type="Node3D" parent="WorldRoot"]
+script = ExtResource("4_city")
+
+[node name="CameraRig" type="Node3D" parent="WorldRoot"]
+position = Vector3(0, 5.2, 8)
+
+[node name="Camera3D" type="Camera3D" parent="WorldRoot/CameraRig"]
+current = true
+fov = 72.0
+
+[node name="KeyLight" type="DirectionalLight3D" parent="WorldRoot"]
+rotation_degrees = Vector3(-52, -28, 0)
+light_color = Color(0.54, 0.68, 1, 1)
+light_energy = 1.35
+shadow_enabled = true
+directional_shadow_max_distance = 90.0
+
+[node name="RimLight" type="OmniLight3D" parent="WorldRoot"]
+position = Vector3(-8, 10, -18)
+light_color = Color(1, 0.04, 0.15, 1)
+light_energy = 10.0
+omni_range = 35.0
+
+[node name="SaveManager" type="Node" parent="."]
+script = ExtResource("7_save")
+
+[node name="Audio" type="Node" parent="."]
+script = ExtResource("6_audio")
+
+[node name="HUD" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("5_hud")

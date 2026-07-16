@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "web-protocol"
+version = "0.1.0"
+description = "Offline computer-vision arcade game supervisor and vision service"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "numpy==1.26.4",
+  "opencv-python==4.10.0.84",
+  "mediapipe==0.10.21",
+  "PyYAML==6.0.2",
+  "psutil==6.1.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.5", "ruff==0.9.10"]
+
+[tool.pytest.ini_options]
+testpaths = ["vision/tests", "tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+

@@ -1,0 +1,20 @@
+models:
+  pose: vision/models/pose_landmarker_lite.task
+  hands: vision/models/hand_landmarker.task
+calibration:
+  duration_seconds: 5.5
+  minimum_samples: 24
+  lean_threshold: 0.075
+  jump_threshold: 0.10
+  crouch_threshold: 0.12
+  dodge_velocity_threshold: 0.85
+gestures:
+  trigger_hold_ms: 80
+  trigger_release_ms: 70
+  pull_threshold: 0.16
+  double_web_hold_ms: 220
+network:
+  snapshot_hz: 30
+  heartbeat_hz: 4
+  queue_size: 2
+

@@ -1,0 +1,27 @@
+game:
+  executable: Build/WebProtocol.exe
+  project_path: game
+  udp_host: 127.0.0.1
+  udp_port: 42420
+  health_port: 42421
+  session_seconds: 90.0
+  fullscreen: true
+  auto_reset: true
+vision:
+  camera_id: 0
+  mirror: true
+  capture_width: 1280
+  capture_height: 720
+  inference_width: 640
+  inference_height: 360
+  target_fps: 30
+  stale_after_ms: 250
+  pose_confidence: 0.55
+  hand_confidence: 0.50
+  aim_smoothing: 0.32
+  aim_assistance: 0.20
+operator:
+  log_level: INFO
+  leaderboard_length: 50
+  restart_vision_once: true
+
