@@ -17,6 +17,9 @@ class InputSnapshot:
     tracked: bool = False
     pose_confidence: float = 0.0
     hand_confidence: float = 0.0
+    camera_fps: float = 0.0
+    pose_fps: float = 0.0
+    hand_fps: float = 0.0
     move: float = 0.0
     aim_x: float = 0.5
     aim_y: float = 0.5

@@ -10,12 +10,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic, sleep
 
-from tools.locate_godot import godot_version, locate_godot
-from vision.health_server import probe_health
-from web_protocol.config import ConfigurationError, ProjectConfig
-from web_protocol.logging_setup import configure_logging
-
 ROOT = Path(__file__).resolve().parent
+VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+
+if VENV_PYTHON.is_file() and Path(sys.executable).resolve() != VENV_PYTHON.resolve():
+    environment = os.environ.copy()
+    environment["WEB_PROTOCOL_REEXEC"] = "1"
+    raise SystemExit(
+        subprocess.call(
+            [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]], env=environment
+        )
+    )
+
+from tools.locate_godot import godot_version, locate_godot  # noqa: E402
+from vision.health_server import probe_health  # noqa: E402
+from web_protocol.config import ConfigurationError, ProjectConfig  # noqa: E402
+from web_protocol.logging_setup import configure_logging  # noqa: E402
 
 
 @dataclass(slots=True)
@@ -28,6 +38,7 @@ class LaunchOptions:
     boss_test: bool
     camera: int | None
     skip_calibration: bool
+    smoke_seconds: float | None
 
 
 def parser() -> argparse.ArgumentParser:
@@ -42,6 +53,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--boss-test", action="store_true")
     result.add_argument("--camera", type=int)
     result.add_argument("--skip-calibration", action="store_true")
+    result.add_argument("--smoke-seconds", type=float)
     return result
 
 
@@ -114,6 +126,18 @@ def terminate(process: subprocess.Popen[bytes] | None, timeout: float = 3.0) -> 
         process.wait(timeout=1.0)
 
 
+def set_event_awake(active: bool) -> None:
+    if os.name != "nt":
+        return
+    import ctypes
+
+    continuous = 0x80000000
+    display_required = 0x00000002
+    system_required = 0x00000001
+    flags = continuous | display_required | system_required if active else continuous
+    ctypes.windll.kernel32.SetThreadExecutionState(flags)
+
+
 def launch(config: ProjectConfig, options: LaunchOptions, logger: object) -> int:
     game_executable = ROOT / str(config.section("game")["executable"])
     if not game_executable.exists():
@@ -124,6 +148,8 @@ def launch(config: ProjectConfig, options: LaunchOptions, logger: object) -> int
     vision_command = [sys.executable, "-m", "vision.main"]
     if options.simulate_vision or options.keyboard_only:
         vision_command.append("--simulate")
+    if options.capture_demo:
+        vision_command.extend(("--time-scale", "8.0"))
     if options.camera is not None:
         vision_command.extend(("--camera", str(options.camera)))
     if options.debug:
@@ -137,7 +163,22 @@ def launch(config: ProjectConfig, options: LaunchOptions, logger: object) -> int
             return 21
         game = subprocess.Popen([str(game_executable), "--", *game_arguments(options)], cwd=ROOT)
         vision_restarted = False
+        smoke_started = monotonic()
         while game.poll() is None:
+            if options.smoke_seconds and monotonic() - smoke_started >= options.smoke_seconds:
+                health = probe_health(
+                    str(config.section("game")["udp_host"]),
+                    int(config.section("game")["health_port"]),
+                )
+                report_name = (
+                    "simulated_supervisor_smoke.json"
+                    if options.simulate_vision
+                    else "live_camera_smoke.json"
+                )
+                report_path = ROOT / "artifacts" / "test_reports" / report_name
+                report_path.parent.mkdir(parents=True, exist_ok=True)
+                report_path.write_text(json.dumps(health or {}, indent=2), encoding="utf-8")
+                return 0 if health and int(health.get("packets_sent", 0)) > 0 else 22
             if vision.poll() is not None and not vision_restarted:
                 logger.warning("vision exited; restarting once")
                 vision = subprocess.Popen(vision_command, cwd=ROOT)
@@ -174,8 +215,13 @@ def main(argv: list[str] | None = None) -> int:
         boss_test=args.boss_test,
         camera=args.camera,
         skip_calibration=args.skip_calibration,
+        smoke_seconds=args.smoke_seconds,
     )
-    return launch(config, options, logger)
+    set_event_awake(True)
+    try:
+        return launch(config, options, logger)
+    finally:
+        set_event_awake(False)
 
 
 if __name__ == "__main__":

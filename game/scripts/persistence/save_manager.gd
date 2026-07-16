@@ -36,10 +36,20 @@ func add_result(result: Dictionary) -> void:
     _atomic_save()
 
 
+func clear_leaderboard() -> void:
+    entries = []
+    _atomic_save()
+
+
+func today_entries() -> Array:
+    var today := Time.get_date_string_from_system()
+    return entries.filter(func(entry): return str(entry.get("timestamp", "")).begins_with(today))
+
 func daily_high_score() -> int:
-    if entries.is_empty():
+    var today := today_entries()
+    if today.is_empty():
         return 0
-    return int(entries[0].get("score", 0))
+    return int(today[0].get("score", 0))
 
 
 func _atomic_save() -> void:

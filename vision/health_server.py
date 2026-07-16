@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import socket
 import threading
+from contextlib import suppress
 from dataclasses import dataclass, field
+from queue import Empty, Full, Queue
 from time import monotonic
 
 
@@ -13,8 +15,10 @@ class HealthState:
     mode: str = "starting"
     camera_fps: float = 0.0
     inference_fps: float = 0.0
+    hand_fps: float = 0.0
     packets_sent: int = 0
     started_at: float = field(default_factory=monotonic)
+    commands: Queue[dict[str, object]] = field(default_factory=lambda: Queue(maxsize=8))
 
     def payload(self) -> bytes:
         return json.dumps(
@@ -23,11 +27,28 @@ class HealthState:
                 "mode": self.mode,
                 "camera_fps": round(self.camera_fps, 2),
                 "inference_fps": round(self.inference_fps, 2),
+                "hand_fps": round(self.hand_fps, 2),
                 "packets_sent": self.packets_sent,
                 "uptime": round(monotonic() - self.started_at, 2),
             },
             separators=(",", ":"),
         ).encode("ascii")
+
+    def enqueue_command(self, command: dict[str, object]) -> None:
+        try:
+            self.commands.put_nowait(command)
+        except Full:
+            with suppress(Empty):
+                self.commands.get_nowait()
+            self.commands.put_nowait(command)
+
+    def drain_commands(self) -> list[dict[str, object]]:
+        drained: list[dict[str, object]] = []
+        while True:
+            try:
+                drained.append(self.commands.get_nowait())
+            except Empty:
+                return drained
 
 
 class UdpHealthServer:
@@ -53,9 +74,19 @@ class UdpHealthServer:
             server.bind((self.host, self.port))
             while not self._stop.is_set():
                 try:
-                    _, address = server.recvfrom(128)
-                    server.sendto(self.state.payload(), address)
-                except TimeoutError:
+                    packet, address = server.recvfrom(2048)
+                    if packet == b"health":
+                        server.sendto(self.state.payload(), address)
+                        continue
+                    command = json.loads(packet.decode("ascii"))
+                    if isinstance(command, dict) and isinstance(command.get("command"), str):
+                        self.state.enqueue_command(command)
+                        server.sendto(b'{"ok":true}', address)
+                    else:
+                        server.sendto(b'{"ok":false}', address)
+                except (UnicodeError, json.JSONDecodeError):
+                    continue
+                except (TimeoutError, ConnectionResetError):
                     continue
                 except OSError:
                     if not self._stop.is_set():

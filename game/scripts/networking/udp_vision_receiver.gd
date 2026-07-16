@@ -2,6 +2,7 @@ class_name UdpVisionReceiver
 extends Node
 
 var server := UDPServer.new()
+var peers: Array[PacketPeerUDP] = []
 var latest: Dictionary = {}
 var latest_sequence := -1
 var last_packet_ms := -1
@@ -21,8 +22,9 @@ func _process(delta: float) -> void:
     if not enabled:
         return
     server.poll()
-    if server.is_connection_available():
-        var peer := server.take_connection()
+    while server.is_connection_available():
+        peers.append(server.take_connection())
+    for peer in peers:
         while peer.get_available_packet_count() > 0:
             _accept_packet(peer.get_packet())
     _rate_elapsed += delta
@@ -46,5 +48,5 @@ func _accept_packet(packet: PackedByteArray) -> void:
     _packets_this_second += 1
 
 
-func is_fresh() -> bool:
-    return last_packet_ms >= 0 and Time.get_ticks_msec() - last_packet_ms < 350
+func is_fresh(max_age_ms: int = 350) -> bool:
+    return last_packet_ms >= 0 and Time.get_ticks_msec() - last_packet_ms < max_age_ms

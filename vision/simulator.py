@@ -6,6 +6,10 @@ from math import sin
 from vision.protocol import InputSnapshot
 
 
+def _inside(elapsed: float, start: float, end: float) -> bool:
+    return start <= elapsed < end
+
+
 @dataclass(slots=True)
 class ScriptedPlayer:
     session_id: str = "simulated-player"
@@ -13,29 +17,33 @@ class ScriptedPlayer:
 
     def sample(self, elapsed: float) -> InputSnapshot:
         self.sequence += 1
-        move = sin(elapsed * 0.9) * 0.72 if 9.5 <= elapsed < 55.0 else 0.0
-        pulse = elapsed % 4.0
-        boss_pulse = elapsed % 3.5
+        chase_web = (
+            _inside(elapsed, 13.0, 15.2)
+            or _inside(elapsed, 20.0, 22.5)
+            or _inside(elapsed, 28.0, 30.8)
+            or _inside(elapsed, 33.0, 36.0)
+            or _inside(elapsed, 48.0, 51.2)
+        )
+        boss_web = _inside(elapsed, 68.8, 71.6) or _inside(elapsed, 72.2, 75.4)
+        finisher = elapsed >= 78.0
         return InputSnapshot(
             sequence=self.sequence,
             session_id=self.session_id,
             tracked=True,
             pose_confidence=0.94,
             hand_confidence=0.91,
-            move=move,
+            move=sin(elapsed * 0.72) * 0.45 if _inside(elapsed, 9.5, 55.0) else 0.0,
             aim_x=0.5 + sin(elapsed * 0.7) * 0.26,
             aim_y=0.44 + sin(elapsed * 0.43) * 0.12,
-            jump=9.5 <= elapsed < 55.0 and 0.15 < pulse < 0.45,
-            crouch=9.5 <= elapsed < 55.0 and 1.6 < pulse < 2.05,
-            dodge_left=58.0 <= elapsed < 78.0 and boss_pulse < 0.22,
-            dodge_right=58.0 <= elapsed < 78.0 and 1.7 < boss_pulse < 1.92,
-            shield=58.0 <= elapsed < 78.0 and 2.7 < boss_pulse < 3.1,
-            web_left=(5.5 <= elapsed < 9.5 and pulse < 0.5)
-            or (9.5 <= elapsed < 78.0 and 2.2 < pulse < 2.45)
-            or elapsed >= 78.0,
-            web_right=(5.5 <= elapsed < 9.5 and 0.8 < pulse < 1.3)
-            or (9.5 <= elapsed < 78.0 and 2.2 < pulse < 2.45)
-            or elapsed >= 78.0,
-            pull=0.82 if 24.0 <= elapsed % 30.0 <= 25.1 else 0.0,
-            two_hand_pull=min(1.0, max(0.0, (elapsed - 79.0) / 2.5)) if elapsed >= 78.0 else 0.0,
+            jump=_inside(elapsed, 16.0, 18.2) or _inside(elapsed, 76.0, 77.8),
+            crouch=_inside(elapsed, 24.0, 26.4) or _inside(elapsed, 62.0, 64.3),
+            dodge_left=_inside(elapsed, 10.5, 12.5) or _inside(elapsed, 58.8, 61.0),
+            dodge_right=_inside(elapsed, 38.5, 40.9),
+            shield=_inside(elapsed, 43.0, 45.8) or _inside(elapsed, 65.2, 67.7),
+            web_left=chase_web or boss_web or finisher,
+            web_right=_inside(elapsed, 48.0, 51.2) or finisher,
+            pull=0.9
+            if _inside(elapsed, 20.0, 22.5) or _inside(elapsed, 72.2, 75.4)
+            else 0.0,
+            two_hand_pull=min(1.0, max(0.0, (elapsed - 78.7) / 1.6)) if finisher else 0.0,
         )

@@ -10,6 +10,8 @@ from pathlib import Path
 from time import monotonic, sleep
 from uuid import uuid4
 
+import cv2
+
 from vision.camera_service import CameraService
 from vision.hand_service import HandService
 from vision.health_server import HealthState, UdpHealthServer
@@ -26,12 +28,18 @@ from web_protocol.logging_setup import configure_logging
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="WEB//PROTOCOL local vision service")
     parser.add_argument("--simulate", action="store_true")
+    parser.add_argument("--time-scale", type=float, default=1.0)
     parser.add_argument("--camera", type=int)
     parser.add_argument("--debug", action="store_true")
     return parser
 
 
-def run_simulator(config: ProjectConfig, stop: threading.Event, logger: logging.Logger) -> int:
+def run_simulator(
+    config: ProjectConfig,
+    stop: threading.Event,
+    logger: logging.Logger,
+    time_scale: float = 1.0,
+) -> int:
     game = config.section("game")
     network = config.section("network")
     host, port = str(game["udp_host"]), int(game["udp_port"])
@@ -50,8 +58,15 @@ def run_simulator(config: ProjectConfig, stop: threading.Event, logger: logging.
                 if now < next_packet:
                     sleep(min(interval, next_packet - now))
                     continue
-                elapsed = (now - started) % 90.0
-                sender.sendto(encode_snapshot(player.sample(elapsed)), (host, port))
+                for command in health.drain_commands():
+                    if command.get("command") == "sync_session":
+                        started = now
+                elapsed = ((now - started) * max(0.1, time_scale)) % 90.0
+                snapshot = player.sample(elapsed)
+                snapshot.camera_fps = float(network["snapshot_hz"])
+                snapshot.pose_fps = float(network["snapshot_hz"])
+                snapshot.hand_fps = float(network["snapshot_hz"])
+                sender.sendto(encode_snapshot(snapshot), (host, port))
                 health.packets_sent += 1
                 health.inference_fps = float(network["snapshot_hz"])
                 health.camera_fps = float(network["snapshot_hz"])
@@ -121,6 +136,7 @@ def run_live(
         int(vision_config["capture_height"]),
         bool(vision_config["mirror"]),
         logger,
+        int(vision_config["target_fps"]),
     )
     pose_service = PoseService(root / str(models["pose"]), float(vision_config["pose_confidence"]))
     hand_service = HandService(root / str(models["hands"]), float(vision_config["hand_confidence"]))
@@ -142,6 +158,14 @@ def run_live(
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
             target = (str(game["udp_host"]), int(game["udp_port"]))
             while not stop.is_set():
+                for command in health.drain_commands():
+                    name = str(command.get("command", ""))
+                    if name == "restart_camera":
+                        camera.request_restart()
+                    elif name == "set_camera":
+                        camera.request_restart(camera_id=int(command.get("camera_id", 0)))
+                    elif name == "set_mirror":
+                        camera.request_restart(mirror=bool(command.get("enabled", True)))
                 frame = camera.frames.wait_newer(last_frame_sequence, timeout=0.1)
                 health.camera_fps = camera.metrics.fps
                 health.mode = "live" if camera.metrics.connected else "reconnecting"
@@ -150,8 +174,16 @@ def run_live(
                 last_frame_sequence = frame.sequence
                 now = monotonic()
                 timestamp_ms = max(1, int((now - started) * 1000.0))
-                pose_result = pose_service.detect(frame.value, timestamp_ms)
-                hand_result = hand_service.detect(frame.value, timestamp_ms)
+                inference_frame = cv2.resize(
+                    frame.value,
+                    (
+                        int(vision_config["inference_width"]),
+                        int(vision_config["inference_height"]),
+                    ),
+                    interpolation=cv2.INTER_AREA,
+                )
+                pose_result = pose_service.detect(inference_frame, timestamp_ms)
+                hand_result = hand_service.detect(inference_frame, timestamp_ms)
                 pose = (
                     extract_pose(pose_result.pose_landmarks[0])
                     if pose_result.pose_landmarks
@@ -171,15 +203,17 @@ def run_live(
                 body = movement.classify(pose, now) if movement and pose else BodyActions()
                 hand_actions = _hand_actions(hand_result, hands)
                 sequence += 1
-                sender.sendto(
-                    encode_snapshot(_snapshot(sequence, session_id, pose, body, hand_actions)),
-                    target,
-                )
+                snapshot = _snapshot(sequence, session_id, pose, body, hand_actions)
+                snapshot.camera_fps = camera.metrics.fps
+                snapshot.pose_fps = health.inference_fps
+                snapshot.hand_fps = health.inference_fps
+                sender.sendto(encode_snapshot(snapshot), target)
                 health.packets_sent += 1
                 inference_frames += 1
                 elapsed = now - inference_started
                 if elapsed >= 1.0:
                     health.inference_fps = inference_frames / elapsed
+                    health.hand_fps = health.inference_fps
                     inference_frames = 0
                     inference_started = now
     finally:
@@ -199,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     if args.simulate:
-        return run_simulator(config, stop, logger)
+        return run_simulator(config, stop, logger, args.time_scale)
     try:
         return run_live(config, args, stop, logger)
     except Exception:

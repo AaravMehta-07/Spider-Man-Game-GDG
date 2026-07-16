@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/core/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/core/session_controller.gd" id="2_session"]
@@ -7,17 +7,19 @@
 [ext_resource type="Script" path="res://scripts/ui/hud.gd" id="5_hud"]
 [ext_resource type="Script" path="res://scripts/audio/audio_manager.gd" id="6_audio"]
 [ext_resource type="Script" path="res://scripts/persistence/save_manager.gd" id="7_save"]
+[ext_resource type="Script" path="res://scripts/chase/chase_director.gd" id="8_chase"]
+[ext_resource type="Script" path="res://scripts/boss/boss_controller.gd" id="9_boss"]
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
 background_color = Color(0.005, 0.012, 0.035, 1)
 ambient_light_source = 3
-ambient_light_color = Color(0.14, 0.2, 0.42, 1)
-ambient_light_energy = 0.75
+ambient_light_color = Color(0.25, 0.29, 0.4, 1)
+ambient_light_energy = 1.15
 fog_enabled = true
 fog_light_color = Color(0.09, 0.13, 0.26, 1)
 fog_light_energy = 0.55
-fog_density = 0.008
+fog_density = 0.004
 glow_enabled = true
 glow_intensity = 0.85
 glow_bloom = 0.2
@@ -30,6 +32,12 @@ script = ExtResource("2_session")
 
 [node name="UdpVisionReceiver" type="Node" parent="."]
 script = ExtResource("3_udp")
+
+[node name="ChaseDirector" type="Node" parent="."]
+script = ExtResource("8_chase")
+
+[node name="BossController" type="Node" parent="."]
+script = ExtResource("9_boss")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_main")
@@ -49,7 +57,7 @@ fov = 72.0
 [node name="KeyLight" type="DirectionalLight3D" parent="WorldRoot"]
 rotation_degrees = Vector3(-52, -28, 0)
 light_color = Color(0.54, 0.68, 1, 1)
-light_energy = 1.35
+light_energy = 2.1
 shadow_enabled = true
 directional_shadow_max_distance = 90.0
 

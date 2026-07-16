@@ -22,16 +22,24 @@ class CameraMetrics:
 
 class CameraService:
     def __init__(
-        self, camera_id: int, width: int, height: int, mirror: bool, logger: logging.Logger
+        self,
+        camera_id: int,
+        width: int,
+        height: int,
+        mirror: bool,
+        logger: logging.Logger,
+        target_fps: int = 30,
     ) -> None:
         self.camera_id = camera_id
         self.width = width
         self.height = height
         self.mirror = mirror
+        self.target_fps = target_fps
         self.logger = logger
         self.frames: LatestFrameBuffer[np.ndarray] = LatestFrameBuffer()
         self.metrics = CameraMetrics()
         self._stop = threading.Event()
+        self._restart = threading.Event()
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -44,8 +52,16 @@ class CameraService:
         if self._thread:
             self._thread.join(timeout=2.0)
 
+    def request_restart(self, camera_id: int | None = None, mirror: bool | None = None) -> None:
+        if camera_id is not None:
+            self.camera_id = max(0, camera_id)
+        if mirror is not None:
+            self.mirror = mirror
+        self._restart.set()
     def _open(self) -> cv2.VideoCapture:
-        capture = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
+        capture = cv2.VideoCapture(self.camera_id, cv2.CAP_ANY)
+        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        capture.set(cv2.CAP_PROP_FPS, self.target_fps)
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -57,6 +73,12 @@ class CameraService:
         window_frames = 0
         try:
             while not self._stop.is_set():
+                if self._restart.is_set():
+                    if capture is not None:
+                        capture.release()
+                    capture = None
+                    self.metrics.connected = False
+                    self._restart.clear()
                 if capture is None or not capture.isOpened():
                     capture = self._open()
                     if not capture.isOpened():
