@@ -3,6 +3,8 @@ extends Node
 
 signal attack_started(kind: StringName, prompt: String, direction: StringName)
 signal counter_success(points: int, label: String)
+signal web_hit(label: String)
+signal web_missed
 signal player_hit(damage: float)
 signal boss_health_changed(value: float)
 signal finisher_prompt(value: String)
@@ -23,7 +25,9 @@ var health := 100.0
 var successful_counters := 0
 var tension := 0.0
 var final_contained := false
+var normal_web_hits := 0
 var _assist_elapsed := 0.0
+var _last_web_hit_time := -10.0
 
 
 func reset() -> void:
@@ -33,7 +37,9 @@ func reset() -> void:
     successful_counters = 0
     tension = 0.0
     final_contained = false
+    normal_web_hits = 0
     _assist_elapsed = 0.0
+    _last_web_hit_time = -10.0
     boss_health_changed.emit(health)
 
 
@@ -104,8 +110,32 @@ func _update_finisher(elapsed: float, delta: float, actions: Dictionary) -> void
         health = 0.0
         final_contained = true
         boss_health_changed.emit(health)
-        finisher_prompt.emit("THE VEIL CONTAINED")
+        finisher_prompt.emit("THE VOID REGENT CONTAINED")
         contained.emit()
+
+
+func register_web_shot(elapsed: float, aim: Vector2, shot_count: int, assist: float) -> bool:
+    if elapsed < 58.0 or elapsed >= 78.0 or shot_count <= 0:
+        return false
+    if elapsed - _last_web_hit_time < 0.18:
+        return false
+    _last_web_hit_time = elapsed
+    if not boss_target_locked(aim, assist):
+        web_missed.emit()
+        return false
+    var damage := 2.8 + float(shot_count - 1) * 1.6
+    health = maxf(8.0, health - damage)
+    normal_web_hits += shot_count
+    boss_health_changed.emit(health)
+    web_hit.emit("DOUBLE WEB HIT" if shot_count > 1 else "WEB HIT")
+    return true
+
+
+static func boss_target_locked(aim: Vector2, assist: float = 0.0) -> bool:
+    var center := Vector2(0.5, 0.43)
+    var radius := Vector2(0.17, 0.23) + Vector2.ONE * clampf(assist, 0.0, 1.0) * 0.05
+    var offset := aim - center
+    return absf(offset.x) <= radius.x and absf(offset.y) <= radius.y
 
 
 func _matches(action: String, input: Dictionary) -> bool:
@@ -121,7 +151,7 @@ func _matches(action: String, input: Dictionary) -> bool:
         "shield":
             return bool(input.get("shield", false))
         "web":
-            return bool(input.get("web_left", false)) or bool(input.get("web_right", false))
+            return bool(input.get("web_left_trigger", false)) or bool(input.get("web_right_trigger", false)) or bool(input.get("web_left", false)) or bool(input.get("web_right", false))
         "sling":
             var webbed := bool(input.get("web_left", false)) or bool(input.get("web_right", false))
             return webbed and float(input.get("pull", 0.0)) > 0.25
@@ -137,8 +167,11 @@ func _direction_for(action: String) -> StringName:
 
 
 func _label(kind: String) -> String:
-    if kind == "debris":
-        return "PERFECT SLING"
-    if kind == "counter":
-        return "COUNTER HIT"
-    return "BOSS REVEALED"
+    match kind:
+        "right_slash": return "PERFECT DODGE"
+        "overhead": return "PERFECT CROUCH"
+        "energy": return "SHIELD LOCKED"
+        "counter": return "COUNTER HIT"
+        "debris": return "PERFECT SLING"
+        "ground_wave": return "PERFECT JUMP"
+    return "COUNTER SUCCESS"

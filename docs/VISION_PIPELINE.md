@@ -2,8 +2,10 @@
 
 ## Capture
 
-CameraService owns one OpenCV DirectShow capture thread. It requests the configured
-resolution and buffer size one. Frames are mirrored for participant intuition and
+CameraService owns one OpenCV capture thread. On Windows it tries Media Foundation,
+DirectShow, and automatic backend fallback across the configured camera and bounded
+camera IDs. It requests the configured resolution with a one-frame driver buffer.
+Frames are mirrored for participant intuition and
 published into LatestFrameBuffer, a one-slot exchange. New frames replace old ones,
 so inference never works through a latency backlog.
 
@@ -11,7 +13,9 @@ so inference never works through a latency backlog.
 
 PoseService and HandService use official local MediaPipe Tasks model files in VIDEO
 mode with increasing millisecond timestamps. Pose tracks one body; hands track up
-to two. The models are loaded once and closed during clean shutdown.
+to two. Their independent inference calls run concurrently in a fixed two-worker
+pool, with no queued frame history. The models are loaded once and closed during
+clean shutdown.
 
 ## Calibration and features
 
@@ -27,7 +31,7 @@ MovementClassifier applies confidence-aware smoothing and hysteresis:
 - lateral velocity produces dodge with cooldown
 - raised, close wrists produce shield
 
-Hand features identify index-forward web pose, pinch and fist release. Aim uses the
+Hand features identify an explicit open palm, index-forward web pose, pinch and fist release. Aim uses the
 index fingertip. WebGestureClassifier turns sustained shapes into edge-safe triggers
 and estimates pull from closed-hand wrist motion.
 
@@ -38,8 +42,14 @@ tracking confidence, movement, aim, action booleans and pull strengths. Packets 
 compact JSON under 8192 bytes and sent to localhost UDP port 42420. Health replies
 use port 42421.
 
-Godot keeps only the highest sequence and treats input older than 350 ms as stale.
-Stale or lost hand input never fires an accidental web.
+Godot keeps only the highest sequence within each vision-process session ID and
+accepts sequence 1 immediately after a supervised service restart. Input older
+than 600 ms is stale. Stale or lost hand input never fires an accidental web.
+
+The health service reports ready only after a camera is connected, a real frame
+has been captured, inference has completed, and at least one input packet has been
+sent. Camera connection, selected device, frame/inference/packet counts, reconnects,
+and the last error are exposed for launcher diagnostics.
 
 ## Tuning
 

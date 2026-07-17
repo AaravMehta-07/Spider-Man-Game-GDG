@@ -22,3 +22,31 @@ def test_invalid_configuration_is_rejected(tmp_path: Path) -> None:
     (tmp_path / "config" / "vision.yaml").write_text("{}\n", encoding="utf-8")
     with pytest.raises(ConfigurationError):
         ProjectConfig.load(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"game": {"udp_host": "0.0.0.0"}},
+        {"game": {"udp_port": 42420, "health_port": 42420}},
+        {"vision": {"inference_width": 0}},
+        {"vision": {"capture_width": "wide"}},
+        {"calibration": {"minimum_samples": 0}},
+    ],
+)
+def test_runtime_unsafe_overrides_are_rejected(tmp_path: Path, override: dict) -> None:
+    root = Path(__file__).resolve().parents[1]
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "shared.yaml").write_text(
+        (root / "config" / "shared.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    import yaml
+
+    (tmp_path / "config" / "vision.yaml").write_text(
+        (root / "config" / "vision.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (tmp_path / "config" / "local.yaml").write_text(
+        yaml.safe_dump(override), encoding="utf-8"
+    )
+    with pytest.raises(ConfigurationError):
+        ProjectConfig.load(tmp_path)

@@ -76,9 +76,11 @@ func on_state_changed(_previous: StringName, current: StringName) -> void:
     elif current == &"CHASE":
         play_music("chase")
         play_effect("calibration_success")
-    elif current in [&"BOSS_INTRO", &"BOSS_COMBAT"]:
+    elif current == &"BOSS_INTRO":
         play_music("boss")
         play_effect("reveal_sting")
+    elif current == &"BOSS_COMBAT":
+        play_music("boss")
     elif current == &"FINISHER":
         play_music("finisher")
         play_effect("double_web_charge")

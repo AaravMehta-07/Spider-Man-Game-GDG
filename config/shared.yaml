@@ -12,8 +12,8 @@ vision:
   mirror: true
   capture_width: 1280
   capture_height: 720
-  inference_width: 640
-  inference_height: 360
+  inference_width: 576
+  inference_height: 324
   target_fps: 30
   stale_after_ms: 250
   pose_confidence: 0.55
@@ -24,4 +24,3 @@ operator:
   log_level: INFO
   leaderboard_length: 50
   restart_vision_once: true
-

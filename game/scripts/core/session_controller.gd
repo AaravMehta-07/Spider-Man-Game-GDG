@@ -14,10 +14,21 @@ const FINISHER := &"FINISHER"
 const RESULTS := &"RESULTS"
 const RESETTING := &"RESETTING"
 
+const BOUNDARIES := [
+    [5.5, WEB_VERIFICATION],
+    [9.5, CHASE],
+    [55.0, BOSS_INTRO],
+    [58.0, BOSS_COMBAT],
+    [78.0, FINISHER],
+    [83.0, RESULTS],
+    [90.0, RESETTING],
+]
+
 var state: StringName = ATTRACT
 var elapsed := 0.0
 var session_active := false
 var time_scale := 1.0
+var last_reset_reason := "startup"
 
 
 func start_session(skip_calibration: bool = false) -> void:
@@ -26,7 +37,8 @@ func start_session(skip_calibration: bool = false) -> void:
     _transition(CHASE if skip_calibration else CALIBRATION)
 
 
-func reset_to_attract() -> void:
+func reset_to_attract(reason: String = "manual") -> void:
+    last_reset_reason = reason
     elapsed = 0.0
     session_active = false
     _transition(ATTRACT)
@@ -35,13 +47,16 @@ func reset_to_attract() -> void:
 func advance(delta: float) -> void:
     if not session_active:
         return
-    elapsed = minf(90.0, elapsed + delta * time_scale)
-    var target := state_for_time(elapsed)
-    if target != state:
-        _transition(target)
-    if elapsed >= 90.0:
+    var target_elapsed := minf(90.0, elapsed + delta * time_scale)
+    for boundary in BOUNDARIES:
+        var boundary_time := float(boundary[0])
+        if elapsed < boundary_time and target_elapsed >= boundary_time:
+            elapsed = boundary_time
+            _transition(boundary[1])
+    elapsed = target_elapsed
+    if target_elapsed >= 90.0:
         session_finished.emit()
-        reset_to_attract()
+        reset_to_attract("timeline_complete")
 
 
 func state_for_time(time: float) -> StringName:

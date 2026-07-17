@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import random
 from pathlib import Path
 
@@ -88,6 +89,14 @@ def qr_placeholder(path: Path) -> None:
     image.save(path)
 
 
+def app_icon(path: Path) -> None:
+    source = Image.open(BRANDING / "hero_emblem.png").convert("RGBA")
+    source.save(
+        path,
+        format="ICO",
+        sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+    )
+
 def procedural_textures() -> None:
     TEXTURES.mkdir(parents=True, exist_ok=True)
     web = Image.new("RGBA", (512, 512), (3, 8, 22, 255))
@@ -121,14 +130,28 @@ def procedural_textures() -> None:
     halftone.save(TEXTURES / "halftone.png")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Generate replaceable local art assets")
+    parser.add_argument("--force-branding", action="store_true")
+    args = parser.parse_args(argv)
     BRANDING.mkdir(parents=True, exist_ok=True)
-    logo(BRANDING / "game_logo.png", "WEB//PROTOCOL", (226, 10, 38))
-    logo(BRANDING / "event_logo.png", "AI/ML RECRUITMENT", (10, 170, 235))
-    emblem(BRANDING / "hero_emblem.png")
-    qr_placeholder(BRANDING / "recruitment_qr.png")
+    branding_jobs = (
+        (logo, BRANDING / "game_logo.png", ("WEB//PROTOCOL", (226, 10, 38))),
+        (logo, BRANDING / "event_logo.png", ("AI/ML RECRUITMENT", (10, 170, 235))),
+        (emblem, BRANDING / "hero_emblem.png", ()),
+        (qr_placeholder, BRANDING / "recruitment_qr.png", ()),
+    )
+    for generator, path, arguments in branding_jobs:
+        if args.force_branding or not path.exists():
+            generator(path, *arguments)
+    icon_path = BRANDING / "app_icon.ico"
+    if args.force_branding or not icon_path.exists():
+        app_icon(icon_path)
+    icon_path = BRANDING / "app_icon.ico"
+    if args.force_branding or not icon_path.exists():
+        app_icon(icon_path)
     procedural_textures()
-    print("Generated replaceable branding and procedural textures")
+    print("Verified replaceable branding and generated procedural textures")
 
 
 if __name__ == "__main__":

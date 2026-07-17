@@ -10,7 +10,16 @@ var web_pressure := 100.0
 var boss_health := 100.0
 var tension := 0.0
 var prompt := ""
+var instruction_hint := ""
 var tracking := "KEYBOARD READY"
+var camera_ready := false
+var player_tracked := false
+var hand_count := 0
+var hands_ready := false
+var keyboard_mode := false
+var vision_managed := false
+var tracking_lost := false
+var tracking_loss_seconds := 0.0
 var diagnostics_visible := false
 var operator_visible := false
 var operator_page := 0
@@ -42,12 +51,34 @@ var assist_level := 0.2
 var rescues := 0
 var perfect_dodges := 0
 var web_accuracy := 0
+var spider_sense_score := 0
+var boss_control_score := 0
+var target_locked := false
+var gesture_left := "OPEN"
+var gesture_right := "OPEN"
+var collision_strikes := 0
+var max_collision_strikes := 3
+var mission_failed := false
+var shot_feedback := ""
+var onboarding_mode: StringName = &"READY"
+var ready_hold_seconds := 0.0
+var ready_hold_required := 3.0
+var participant_name := ""
+var air_strokes: Array[PackedVector2Array] = []
+var air_cursor := Vector2(0.5, 0.5)
+var air_pen_down := false
+var air_prediction := ""
+var air_confidence := 0.0
+var name_confirm_hold := 0.0
+var name_confirm_required := 1.5
+var rescue_goal := 1
 var high_score := 0
 var leaderboard: Array = []
 var daily_rank := 0
 var attract_background: Texture2D = preload("res://assets/generated/attract_city.png")
 var hero_emblem: Texture2D = preload("res://assets/branding/hero_emblem.png")
 var recruitment_qr: Texture2D = preload("res://assets/branding/recruitment_qr.png")
+var recruitment_qr_ready := FileAccess.file_exists("res://assets/branding/recruitment_qr.ready")
 
 
 func _process(delta: float) -> void:
@@ -63,7 +94,10 @@ func _process(delta: float) -> void:
 func _draw() -> void:
     var viewport_size := size
     if state == &"ATTRACT":
-        _draw_attract(viewport_size)
+        if onboarding_mode == &"NAME_ENTRY":
+            _draw_name_entry(viewport_size)
+        else:
+            _draw_attract(viewport_size)
     elif state == &"RESULTS":
         _draw_results(viewport_size)
     else:
@@ -73,6 +107,8 @@ func _draw() -> void:
         _draw_reticle(viewport_size)
         _draw_webs(viewport_size)
         _draw_danger(viewport_size)
+        if tracking_lost:
+            _draw_reconnect(viewport_size)
     if not impact_label.is_empty():
         _draw_impact(viewport_size)
     if not toast.is_empty():
@@ -115,15 +151,121 @@ func _draw_attract(viewport_size: Vector2) -> void:
     draw_line(Vector2(108, 325), Vector2(780, 325), Color(0.02, 0.72, 1.0), 5)
     _text("YOUR BODY IS THE CONTROLLER", Vector2(111, 392), 28, Color(0.72, 0.86, 1.0))
     _text("STEP INTO THE SCAN ZONE", Vector2(111, 454), 43, Color.WHITE)
-    _panel(Rect2(108, 535, 475, 88), Color(0.82, 0.02, 0.12, 0.92))
-    _text("BEGIN MISSION  [ENTER]", Vector2(142, 593), 27, Color.WHITE)
+    var can_start := keyboard_mode or (camera_ready and player_tracked and hands_ready)
+    var start_color := Color(0.82, 0.02, 0.12, 0.92) if can_start else Color(0.04, 0.16, 0.28, 0.94)
+    _panel(Rect2(108, 535, 560, 88), start_color)
+    if keyboard_mode:
+        _text("ENTER IDENTITY  [ENTER]", Vector2(142, 593), 26, Color.WHITE)
+    elif can_start:
+        _text("IDENTITY LOCK ACQUIRED", Vector2(142, 593), 25, Color.WHITE)
+    elif camera_ready and player_tracked:
+        _text("OPEN PALMS  %.1f / %.1f SEC" % [ready_hold_seconds, ready_hold_required], Vector2(142, 593), 23, Color.WHITE)
+    elif camera_ready:
+        _text("STEP INTO FRAME TO BEGIN", Vector2(142, 593), 25, Color.WHITE)
+    else:
+        _text("CAMERA SERVICE OFFLINE", Vector2(142, 593), 25, Color.WHITE)
+    _text("F4  CAMERA / KEYBOARD MODE", Vector2(108, 660), 19, Color(0.72, 0.86, 1.0))
     _text("DODGE THE CITY  |  MASTER THE WEB", Vector2(108, 760), 24, Color(0.6, 0.86, 1.0))
     _text("DEFEAT WHAT YOU CANNOT SEE", Vector2(108, 803), 24, Color.WHITE)
     _text("ONE PLAYER  |  90 SECONDS  |  NO CONTROLLER", Vector2(108, 865), 20, Color(0.72, 0.76, 0.84))
     _text("LOCAL CAMERA PROCESSING  |  NO VIDEO SAVED", Vector2(108, 905), 17, Color(0.42, 0.7, 0.84))
+    if not keyboard_mode and camera_ready and player_tracked:
+        _bar(Rect2(108, 627, 560, 10), ready_hold_seconds / maxf(0.1, ready_hold_required), Color(0.1, 0.86, 1.0))
     draw_texture_rect(hero_emblem, Rect2(viewport_size.x - 315, 155, 210, 210), false)
     _panel(Rect2(viewport_size.x - 365, 55, 310, 78), Color(0.01, 0.02, 0.05, 0.86))
     _text("DAILY HIGH  %06d" % high_score, Vector2(viewport_size.x - 335, 103), 21, Color(1.0, 0.82, 0.18))
+    _draw_attract_camera(viewport_size)
+    _draw_quick_controls(viewport_size)
+
+
+func _draw_attract_camera(viewport_size: Vector2) -> void:
+    var rect := Rect2(viewport_size.x - 590, 395, 520, 178)
+    _panel(rect, Color(0.005, 0.016, 0.045, 0.94))
+    _text("INPUT STATUS", rect.position + Vector2(28, 38), 18, Color(0.2, 0.78, 1.0))
+    var label := "KEYBOARD READY" if keyboard_mode else "CAMERA READY" if camera_ready else "CAMERA OFFLINE"
+    var status_color := Color(0.25, 1.0, 0.55) if keyboard_mode or (camera_ready and player_tracked and hands_ready) else Color(1.0, 0.72, 0.18) if camera_ready else Color(1.0, 0.2, 0.28)
+    _text(label, rect.position + Vector2(28, 78), 25, status_color)
+    if keyboard_mode:
+        _text("A/D MOVE  |  MOUSE AIM + FIRE", rect.position + Vector2(28, 116), 17, Color.WHITE)
+        _text("SPACE JUMP  |  S CROUCH  |  F SHIELD", rect.position + Vector2(28, 146), 16, Color(0.72, 0.86, 1.0))
+    elif camera_ready and player_tracked and hands_ready:
+        _text("PLAYER TRACKED  |  OPEN-PALM LOCK COMPLETE", rect.position + Vector2(28, 116), 16, Color.WHITE)
+        _text("OPENING AIR-WRITING BOARD", rect.position + Vector2(28, 146), 16, Color(0.72, 0.86, 1.0))
+    elif camera_ready and player_tracked:
+        _text("BODY READY  |  HANDS %d/2" % hand_count, rect.position + Vector2(28, 116), 17, Color.WHITE)
+        _text("HOLD BOTH OPEN PALMS FOR THREE SECONDS", rect.position + Vector2(28, 146), 15, Color(0.72, 0.86, 1.0))
+    elif camera_ready:
+        _text("STAND CENTERED, FACING THE CAMERA", rect.position + Vector2(28, 116), 17, Color.WHITE)
+        _text("KEEP YOUR UPPER BODY + HANDS VISIBLE", rect.position + Vector2(28, 146), 16, Color(0.72, 0.86, 1.0))
+    else:
+        var offline_help := "CAMERA SERVICE RECONNECTING" if vision_managed else "START THE GAME USING run.bat"
+        _text(offline_help, rect.position + Vector2(28, 116), 18, Color.WHITE)
+        _text("OR PRESS F4 FOR KEYBOARD MODE", rect.position + Vector2(28, 146), 16, Color(0.72, 0.86, 1.0))
+
+
+func _draw_quick_controls(viewport_size: Vector2) -> void:
+    var rect := Rect2(viewport_size.x - 690, 610, 620, 405)
+    _panel(rect, Color(0.005, 0.016, 0.045, 0.94))
+    _text("HOW TO PLAY", rect.position + Vector2(30, 42), 24, Color.WHITE)
+    _control_row(rect, 88, "AIM", "CENTER BOTH HANDS ON THE TARGET", "MOVE MOUSE")
+    _control_row(rect, 145, "FIRE / ATTACK", "WEB POSE / PINCH / FIST", "MOUSE CLICK")
+    _control_row(rect, 202, "PULL", "FIRE, CLOSE FIST + PULL BACK", "MOUSE + P")
+    _control_row(rect, 259, "DODGE / MOVE", "LEAN OR STEP LEFT / RIGHT", "A / D")
+    _control_row(rect, 316, "JUMP / CROUCH", "JUMP UP / CROUCH LOW", "SPACE / S")
+    _control_row(rect, 373, "SHIELD", "RAISE BOTH FOREARMS", "F")
+
+
+func _draw_name_entry(viewport_size: Vector2) -> void:
+    draw_texture_rect(attract_background, Rect2(Vector2.ZERO, viewport_size), false)
+    draw_rect(Rect2(Vector2.ZERO, viewport_size), Color(0.002, 0.008, 0.025, 0.83))
+    _text_center("AIR-WRITE YOUR NAME", Vector2(viewport_size.x * 0.5, 82), 48, Color.WHITE)
+    _text_center("ONE UPPERCASE BLOCK LETTER AT A TIME", Vector2(viewport_size.x * 0.5, 124), 19, Color(0.25, 0.78, 1.0))
+    var board := Rect2(viewport_size.x * 0.5 - 390, 175, 780, 610)
+    _panel(board, Color(0.006, 0.018, 0.05, 0.97))
+    draw_rect(board.grow(-22), Color(0.01, 0.035, 0.075, 0.72), true)
+    for x in range(1, 6):
+        var grid_x := board.position.x + board.size.x * float(x) / 6.0
+        draw_line(Vector2(grid_x, board.position.y + 22), Vector2(grid_x, board.end.y - 22), Color(0.1, 0.35, 0.5, 0.18), 1.0)
+    for y in range(1, 5):
+        var grid_y := board.position.y + board.size.y * float(y) / 5.0
+        draw_line(Vector2(board.position.x + 22, grid_y), Vector2(board.end.x - 22, grid_y), Color(0.1, 0.35, 0.5, 0.18), 1.0)
+    for stroke in air_strokes:
+        for index in range(1, stroke.size()):
+            var from := board.position + stroke[index - 1] * board.size
+            var to := board.position + stroke[index] * board.size
+            draw_line(from, to, Color(0.12, 0.86, 1.0), 10.0, true)
+            draw_circle(to, 5.0, Color(0.72, 0.96, 1.0))
+    var cursor_position := board.position + air_cursor * board.size
+    draw_circle(cursor_position, 17.0, Color(1.0, 0.12, 0.2) if air_pen_down else Color(0.1, 0.78, 1.0), false, 4.0)
+    draw_circle(cursor_position, 4.0, Color.WHITE)
+    _panel(Rect2(85, 175, 430, 610), Color(0.005, 0.016, 0.045, 0.96))
+    _text("YOUR NAME", Vector2(120, 230), 20, Color(0.25, 0.78, 1.0))
+    _text(participant_name if not participant_name.is_empty() else "_", Vector2(120, 305), 43, Color.WHITE)
+    _text("PREDICTED LETTER", Vector2(120, 390), 17, Color(0.72, 0.86, 1.0))
+    _text(air_prediction if not air_prediction.is_empty() else "?", Vector2(120, 510), 112, Color(1.0, 0.18, 0.25))
+    _text("MATCH  %d%%" % int(air_confidence * 100.0), Vector2(120, 570), 18, Color(0.25, 0.78, 1.0))
+    _text("FIST     DRAW", Vector2(120, 645), 18, Color.WHITE)
+    _text("OPEN     LIFT PEN", Vector2(120, 682), 18, Color.WHITE)
+    _text("PINCH    ACCEPT LETTER", Vector2(120, 719), 18, Color.WHITE)
+    _panel(Rect2(viewport_size.x - 515, 175, 430, 610), Color(0.005, 0.016, 0.045, 0.96))
+    _text("FINISH", Vector2(viewport_size.x - 475, 230), 20, Color(0.25, 0.78, 1.0))
+    if keyboard_mode:
+        _text("TYPE YOUR NAME", Vector2(viewport_size.x - 475, 305), 23, Color.WHITE)
+        _text("PRESS ENTER", Vector2(viewport_size.x - 475, 350), 23, Color.WHITE)
+        _text("BACKSPACE TO UNDO", Vector2(viewport_size.x - 475, 430), 17, Color(0.72, 0.86, 1.0))
+    else:
+        _text("BOTH FISTS", Vector2(viewport_size.x - 475, 305), 22, Color.WHITE)
+        _text("HOLD TO CLEAR / UNDO", Vector2(viewport_size.x - 475, 342), 17, Color(0.72, 0.86, 1.0))
+        _text("BOTH PALMS OPEN", Vector2(viewport_size.x - 475, 430), 22, Color.WHITE)
+        _text("HOLD TO START MISSION", Vector2(viewport_size.x - 475, 467), 17, Color(0.72, 0.86, 1.0))
+        _bar(Rect2(viewport_size.x - 475, 500, 350, 12), name_confirm_hold / maxf(0.1, name_confirm_required), Color(0.1, 0.86, 1.0))
+    _text("NO CAMERA IMAGE OR BIOMETRICS ARE SAVED", Vector2(viewport_size.x - 475, 720), 14, Color(0.48, 0.72, 0.84))
+
+
+func _control_row(rect: Rect2, y: float, action: String, camera: String, fallback: String) -> void:
+    _text(action, rect.position + Vector2(30, y), 15, Color(1.0, 0.2, 0.28))
+    _text(camera, rect.position + Vector2(190, y), 15, Color.WHITE)
+    _text(fallback, rect.position + Vector2(510, y), 14, Color(0.2, 0.78, 1.0))
 
 
 func _draw_status(viewport_size: Vector2) -> void:
@@ -133,18 +275,25 @@ func _draw_status(viewport_size: Vector2) -> void:
     _text("HERO ENERGY  %d" % int(energy), Vector2(42, 122), 17, Color.WHITE)
     _bar(Rect2(42, 184, 280, 12), web_pressure / 100.0, Color(0.05, 0.72, 1.0))
     _text("WEB PRESSURE  %d" % int(web_pressure), Vector2(42, 178), 16, Color(0.75, 0.9, 1.0))
+    _text(tracking, Vector2(42, 222), 15, Color(0.35, 1.0, 0.62) if not tracking_lost else Color(1.0, 0.72, 0.18))
+    _text("COLLISIONS  %d/%d" % [collision_strikes, max_collision_strikes], Vector2(42, 249), 15, Color(1.0, 0.25, 0.28) if collision_strikes > 0 else Color(0.68, 0.8, 0.92))
     _text("%06d" % score, Vector2(viewport_size.x - 300, 65), 38, Color.WHITE)
     _text("SCORE  |  x%d COMBO" % combo, Vector2(viewport_size.x - 300, 101), 16, Color(0.55, 0.8, 1.0))
     _text("%02d" % int(maxf(0.0, 90.0 - elapsed)), Vector2(viewport_size.x * 0.5 - 35, 62), 34, Color.WHITE)
     if state in [&"BOSS_COMBAT", &"FINISHER"]:
         _bar(Rect2(viewport_size.x * 0.5 - 260, 110, 520, 15), boss_health / 100.0, Color(0.85, 0.02, 0.22))
-        _text_center("THE VEIL", Vector2(viewport_size.x * 0.5, 103), 18, Color.WHITE)
+        _text_center("THE VOID REGENT", Vector2(viewport_size.x * 0.5, 103), 18, Color.WHITE)
 
 
 func _draw_context(viewport_size: Vector2) -> void:
     var headline := prompt if not prompt.is_empty() else _default_prompt()
-    _panel(Rect2(viewport_size.x * 0.5 - 355, viewport_size.y - 178, 710, 82), Color(0.005, 0.012, 0.035, 0.90))
-    _text_center(headline, Vector2(viewport_size.x * 0.5, viewport_size.y - 127), 29, Color.WHITE)
+    _panel(Rect2(viewport_size.x * 0.5 - 550, viewport_size.y - 210, 1100, 118), Color(0.005, 0.012, 0.035, 0.92))
+    _text_center(headline, Vector2(viewport_size.x * 0.5, viewport_size.y - 165), 25, Color.WHITE)
+    var hint := instruction_hint if not instruction_hint.is_empty() else _default_instruction()
+    _text_center(hint, Vector2(viewport_size.x * 0.5, viewport_size.y - 126), 17, Color(0.4, 0.85, 1.0))
+    if state not in [&"ATTRACT", &"RESULTS"]:
+        var feedback := "  |  %s" % shot_feedback if not shot_feedback.is_empty() else ""
+        _text_center("BODY: %s  |  LEFT: %s  |  RIGHT: %s%s" % [body_action, gesture_left, gesture_right, feedback], Vector2(viewport_size.x * 0.5, viewport_size.y - 99), 14, Color(0.65, 1.0, 0.72))
     if state == &"FINISHER":
         _bar(Rect2(viewport_size.x * 0.5 - 250, viewport_size.y - 78, 500, 20), tension, Color(1.0, 0.08, 0.18))
         _text_center("WEB TENSION  %d%%" % int(tension * 100.0), Vector2(viewport_size.x * 0.5, viewport_size.y - 84), 17, Color.WHITE)
@@ -153,22 +302,44 @@ func _draw_context(viewport_size: Vector2) -> void:
 func _default_prompt() -> String:
     match state:
         &"CALIBRATION": return "LINKING HERO SYSTEMS"
-        &"WEB_VERIFICATION": return "AIM WITH YOUR HAND  |  FIRE ONE WEB"
+        &"WEB_VERIFICATION": return "AIM WITH BOTH HANDS  |  FIRE ONE WEB"
         &"CHASE": return "DODGE. WEB. PULL."
         &"BOSS_INTRO": return "UNKNOWN ENTITY LOCKED"
-        &"BOSS_COMBAT": return "SPIDER-SENSE  |  COUNTER WINDOW"
+        &"BOSS_COMBAT": return "AIM. FIRE. COUNTER."
         &"FINISHER": return "PULL  |  KEEP BOTH WEBS LOCKED"
     return ""
 
 
+func _default_instruction() -> String:
+    match state:
+        &"CALIBRATION": return "STAND CENTERED WITH YOUR UPPER BODY AND BOTH HANDS VISIBLE"
+        &"WEB_VERIFICATION": return "CLASSIC WEB POSE, PINCH, OR CLENCH A FIST TO FIRE"
+        &"CHASE": return "LEAN TO MOVE  |  FOLLOW EACH ACTION PROMPT"
+        &"BOSS_COMBAT": return "CENTER BOTH HANDS FOR TARGET LOCK, THEN FIRE"
+        &"FINISHER": return "FIRE BOTH WEBS, THEN PULL BOTH ARMS BACK"
+    return ""
+
+
+func _draw_reconnect(viewport_size: Vector2) -> void:
+    var rect := Rect2(viewport_size.x * 0.5 - 330, 250, 660, 190)
+    _panel(rect, Color(0.01, 0.02, 0.055, 0.97))
+    _text_center("CAMERA SIGNAL LOST", Vector2(viewport_size.x * 0.5, 305), 30, Color(1.0, 0.22, 0.28))
+    _text_center("RETURN TO THE SCAN ZONE  |  MISSION CLOCK CONTINUES", Vector2(viewport_size.x * 0.5, 349), 17, Color.WHITE)
+    _text_center("KEYBOARD BACKUP: A/D MOVE  |  SPACE JUMP  |  MOUSE FIRE", Vector2(viewport_size.x * 0.5, 384), 16, Color(0.4, 0.85, 1.0))
+    _text_center("RECONNECTING  %.1fs" % tracking_loss_seconds, Vector2(viewport_size.x * 0.5, 417), 15, Color(1.0, 0.72, 0.18))
+
+
 func _draw_reticle(viewport_size: Vector2) -> void:
     var point := Vector2(aim.x * viewport_size.x, aim.y * viewport_size.y)
-    var color := Color(0.1, 0.8, 1.0) if web_pressure > 20.0 else Color(1.0, 0.15, 0.2)
+    var color := Color(0.2, 1.0, 0.48) if target_locked else (Color(0.1, 0.8, 1.0) if web_pressure > 20.0 else Color(1.0, 0.15, 0.2))
     draw_circle(point, 24, Color(color, 0.12), false, 3)
     draw_line(point - Vector2(38, 0), point - Vector2(12, 0), color, 3)
     draw_line(point + Vector2(12, 0), point + Vector2(38, 0), color, 3)
     draw_line(point - Vector2(0, 38), point - Vector2(0, 12), color, 3)
     draw_line(point + Vector2(0, 12), point + Vector2(0, 38), color, 3)
+    if target_locked:
+        draw_arc(point, 34.0, 0.0, TAU, 32, color, 3.0)
+        _text_center("TARGET LOCK", point + Vector2(0, 58), 14, color)
 
 
 func _draw_webs(viewport_size: Vector2) -> void:
@@ -236,29 +407,34 @@ func _draw_impact(viewport_size: Vector2) -> void:
 
 
 func _draw_toast(viewport_size: Vector2) -> void:
-    _panel(Rect2(viewport_size.x * 0.5 - 250, 150, 500, 58), Color(0.005, 0.012, 0.035, 0.92))
-    _text_center(toast, Vector2(viewport_size.x * 0.5, 188), 20, Color.WHITE)
+    if state == &"ATTRACT":
+        _panel(Rect2(viewport_size.x * 0.5 - 460, 25, 920, 58), Color(0.005, 0.012, 0.035, 0.95))
+        _text_center(toast, Vector2(viewport_size.x * 0.5, 63), 16, Color.WHITE)
+    else:
+        _panel(Rect2(viewport_size.x * 0.5 - 350, 150, 700, 58), Color(0.005, 0.012, 0.035, 0.92))
+        _text_center(toast, Vector2(viewport_size.x * 0.5, 188), 18, Color.WHITE)
 
 
 func _draw_results(viewport_size: Vector2) -> void:
     draw_texture_rect(attract_background, Rect2(Vector2.ZERO, viewport_size), false)
     draw_rect(Rect2(Vector2.ZERO, viewport_size), Color(0.002, 0.008, 0.025, 0.78))
-    _text_center("MISSION COMPLETE", Vector2(viewport_size.x * 0.5, 175), 64, Color.WHITE)
-    _text_center("THE NEON WEAVER", Vector2(viewport_size.x * 0.5, 235), 29, Color(1.0, 0.08, 0.16))
+    _text_center("MISSION FAILED" if mission_failed else "MISSION COMPLETE", Vector2(viewport_size.x * 0.5, 175), 64, Color(1.0, 0.12, 0.18) if mission_failed else Color.WHITE)
+    _text_center(participant_name if not participant_name.is_empty() else "THE NEON WEAVER", Vector2(viewport_size.x * 0.5, 235), 29, Color(1.0, 0.08, 0.16))
     _panel(Rect2(viewport_size.x * 0.5 - 410, 292, 820, 365), Color(0.015, 0.03, 0.075, 0.96))
     var rows := [
         "TOTAL SCORE          %06d" % score,
-        "SPIDER-SENSE         %d%%" % mini(100, 55 + perfect_dodges * 9),
+        "SPIDER-SENSE         %d%%" % spider_sense_score,
         "WEB ACCURACY         %d%%" % web_accuracy,
-        "RESCUES              %d/2" % rescues,
+        "RESCUES              %d/%d" % [rescues, rescue_goal],
         "PERFECT DODGES       %d" % perfect_dodges,
-        "BOSS CONTROL         %d%%" % mini(100, int((100.0 - boss_health))),
+        "BOSS CONTROL         %d%%" % boss_control_score,
         "FINAL TENSION        %d%%" % int(tension * 100.0),
+        "COLLISION STRIKES    %d/%d" % [collision_strikes, max_collision_strikes],
     ]
     for index in rows.size():
         _text(rows[index], Vector2(viewport_size.x * 0.5 - 320, 350 + index * 42), 23, Color.WHITE)
-    _text_center(_rank_label(), Vector2(viewport_size.x * 0.5, 720), 31, Color(0.1, 0.75, 1.0))
-    _text_center("YOU MASTERED THE WEB.", Vector2(viewport_size.x * 0.5, 805), 25, Color.WHITE)
+    _text_center("RUN DISQUALIFIED" if mission_failed else _rank_label(), Vector2(viewport_size.x * 0.5, 720), 31, Color(1.0, 0.16, 0.2) if mission_failed else Color(0.1, 0.75, 1.0))
+    _text_center("TOO MANY COLLISIONS. TRY AGAIN." if mission_failed else "YOU MASTERED THE WEB.", Vector2(viewport_size.x * 0.5, 805), 25, Color.WHITE)
     _text_center("NOW BUILD THE TECHNOLOGY BEHIND IT.", Vector2(viewport_size.x * 0.5, 850), 22, Color(1.0, 0.15, 0.2))
     _panel(Rect2(70, 310, 400, 330), Color(0.01, 0.02, 0.055, 0.94))
     _text("TOP FIVE TODAY", Vector2(105, 355), 21, Color(0.1, 0.75, 1.0))
@@ -267,10 +443,12 @@ func _draw_results(viewport_size: Vector2) -> void:
         var name := str(entry.get("codename", "Anonymous Hero"))
         _text("%d  %s" % [index + 1, name.left(18)], Vector2(105, 405 + index * 40), 17, Color.WHITE)
         _text("%06d" % int(entry.get("score", 0)), Vector2(360, 405 + index * 40), 17, Color(1.0, 0.82, 0.18))
-    _text("PLAYERS TODAY  %d  |  YOUR RANK  #%d" % [leaderboard.size(), daily_rank], Vector2(105, 615), 15, Color(0.68, 0.8, 0.92))
+    var rank_text := "NO RANK - RUN FAILED" if mission_failed else "YOUR RANK  #%d" % daily_rank
+    _text("PLAYERS TODAY  %d  |  %s" % [leaderboard.size(), rank_text], Vector2(105, 615), 15, Color(0.68, 0.8, 0.92))
     _panel(Rect2(viewport_size.x - 390, 310, 270, 330), Color(1.0, 1.0, 1.0, 0.96))
     draw_texture_rect(recruitment_qr, Rect2(viewport_size.x - 370, 330, 230, 230), false)
-    _text_center("SCAN TO BUILD THE FUTURE", Vector2(viewport_size.x - 255, 605), 15, Color(0.02, 0.04, 0.1))
+    var qr_label := "SCAN TO BUILD THE FUTURE" if recruitment_qr_ready else "EVENT QR NOT CONFIGURED"
+    _text_center(qr_label, Vector2(viewport_size.x - 255, 605), 15, Color(0.02, 0.04, 0.1))
     _text_center("DAILY HIGH  %06d" % high_score, Vector2(viewport_size.x * 0.5, 912), 18, Color(1.0, 0.82, 0.18))
 
 
@@ -335,9 +513,9 @@ func _draw_operator(viewport_size: Vector2) -> void:
         _operator_row(rect, 355, "Web trigger", "POSE + PINCH + RELEASE", "AUTO")
         _operator_row(rect, 405, "Web threshold", "80 ms", "YAML")
         _operator_row(rect, 455, "Aim smoothing", "32%", "YAML")
-        _operator_row(rect, 505, "Aim assistance", "%d%% ADAPTIVE" % int(assist_level * 100.0), "AUTO")
+        _operator_row(rect, 505, "Web endurance assist", "%d%% ADAPTIVE" % int(assist_level * 100.0), "AUTO")
         _operator_row(rect, 555, "Pull sensitivity", "0.160", "YAML")
-        _operator_row(rect, 605, "Boss difficulty", "ADAPTIVE", "AUTO")
+        _operator_row(rect, 605, "Boss completion", "TIMED ASSIST", "AUTO")
         _operator_row(rect, 655, "Reset session", "START CALIBRATION", "R")
         _operator_row(rect, 705, "Recalibrate", "CLEAR PROFILE", "C")
         _operator_row(rect, 755, "Skip to boss", "OPERATOR ONLY", "B")

@@ -11,7 +11,9 @@ extends Node
 @onready var saves: SaveManager = $SaveManager
 
 var keyboard_only := false
+var vision_managed := false
 var capture_mode := false
+var failure_demo := false
 var boss_test := false
 var skip_calibration := false
 var operator_camera_id := 0
@@ -25,22 +27,64 @@ var aim := Vector2(0.5, 0.5)
 var actions: Dictionary = {}
 var assist_level := 0.2
 var last_chance_used := false
+var collision_strikes := 0
+var mission_failed := false
 var _capture_index := 0
 var _attract_captured := false
 var _capture_warmup := 0.0
+var _name_capture_captured := false
 var _result_saved := false
 var _was_firing := false
 var _tracking_loss_elapsed := 0.0
+var _player_tracked := false
+var _tracking_was_lost := false
+var _hand_count := 0
+var _camera_ready_dwell := 0.0
+var _health_port := 42421
 var _impact_label := ""
 var _impact_label_time := 0.0
 var _capture_real_started_ms := 0
 var _fps_samples := PackedFloat32Array()
 var _low_fps_elapsed := 0.0
+var _shot_feedback_time := 0.0
+var onboarding_mode: StringName = &"READY"
+var player_name := ""
+var air_name := AirNameEntry.new()
+var _pinch_was_active := false
+var _clear_hold := 0.0
+var _clear_latched := false
+var _name_confirm_hold := 0.0
+var _vision_command_peer := PacketPeerUDP.new()
+
+const PACKET_TIMEOUT_MS := 600
+const MAX_COLLISION_STRIKES := 3
+const READY_HOLD_SECONDS := 3.0
+const NAME_CONFIRM_SECONDS := 1.5
+const NAME_CLEAR_SECONDS := 0.8
+const CAPTURE_LEADERBOARD_PATH := "res://../artifacts/test_reports/capture_leaderboard.json"
+const INSTRUCTION_HINTS := {
+    &"billboard": "LEAN OR STEP LEFT  |  KEYBOARD: Q / A",
+    &"drone": "AIM BOTH HANDS, THEN USE THE CLASSIC WEB POSE OR CLENCH A FIST  |  MOUSE CLICK",
+    &"vent": "JUMP UP WITH BOTH FEET  |  KEYBOARD: SPACE",
+    &"barrier": "AIM + FIRE, CLOSE YOUR FIST, THEN PULL YOUR ARM BACK  |  HOLD MOUSE + P",
+    &"scaffold": "CROUCH LOW  |  KEYBOARD: S",
+    &"swing": "POINT AT THE ANCHOR, THEN PINCH / WEB POSE TO FIRE  |  MOUSE CLICK",
+    &"rescue": "AIM AT THE CIVILIAN, THEN PINCH / WEB POSE TO FIRE  |  MOUSE CLICK",
+    &"crane": "LEAN OR STEP RIGHT  |  KEYBOARD: E / D",
+    &"shockwave": "RAISE BOTH FOREARMS TO FORM A SHIELD  |  KEYBOARD: F",
+    &"collapse": "AIM BOTH HANDS, THEN FIRE BOTH WEBS  |  LEFT + RIGHT MOUSE",
+    &"right_slash": "LEAN OR STEP LEFT  |  KEYBOARD: Q / A",
+    &"overhead": "CROUCH LOW  |  KEYBOARD: S",
+    &"energy": "RAISE BOTH FOREARMS TO FORM A SHIELD  |  KEYBOARD: F",
+    &"counter": "KEEP THE RETICLE ON THE BOSS, THEN WEB POSE OR CLENCH A FIST  |  MOUSE CLICK",
+    &"debris": "FIRE, CLOSE YOUR FIST, PULL BACK, THEN RELEASE  |  HOLD MOUSE + P",
+    &"ground_wave": "JUMP UP WITH BOTH FEET  |  KEYBOARD: SPACE",
+}
 
 const CAPTURES := [
     [2.0, "02_calibration.png"],
     [7.0, "03_web_verification.png"],
-    [11.5, "04_chase_opening.png"],
+    [13.6, "04_chase_opening.png"],
     [21.0, "05_web_pull.png"],
     [29.0, "06_swing.png"],
     [34.0, "07_rescue.png"],
@@ -55,6 +99,8 @@ const CAPTURES := [
 
 func _ready() -> void:
     _parse_arguments()
+    if capture_mode:
+        _isolate_capture_leaderboard()
     _connect_systems()
     hud.state = session.state
     hud.high_score = saves.daily_high_score()
@@ -64,12 +110,21 @@ func _ready() -> void:
         session.time_scale = 8.0
         _capture_real_started_ms = Time.get_ticks_msec()
     if boss_test:
+        player_name = "THE NEON WEAVER"
         _reset_run()
         _start_session(true)
         session.elapsed = 55.0
     elif skip_calibration:
+        player_name = "THE NEON WEAVER"
         _reset_run()
         _start_session(true)
+
+
+func _isolate_capture_leaderboard() -> void:
+    var directory := ProjectSettings.globalize_path("res://../artifacts/test_reports")
+    DirAccess.make_dir_recursive_absolute(directory)
+    saves.file_path = CAPTURE_LEADERBOARD_PATH
+    saves.entries = []
 
 
 func _connect_systems() -> void:
@@ -78,30 +133,41 @@ func _connect_systems() -> void:
     session.session_finished.connect(_on_session_finished)
     chase.challenge_started.connect(_on_challenge_started)
     chase.challenge_cleared.connect(_on_challenge_cleared)
-    chase.challenge_missed.connect(_on_player_hit)
+    chase.challenge_missed.connect(_on_obstacle_hit)
     boss.attack_started.connect(_on_boss_attack)
     boss.counter_success.connect(_on_boss_counter)
-    boss.player_hit.connect(_on_player_hit)
+    boss.player_hit.connect(_on_boss_hit)
     boss.boss_health_changed.connect(_on_boss_health_changed)
+    boss.web_hit.connect(_on_boss_web_hit)
+    boss.web_missed.connect(_on_boss_web_missed)
     boss.finisher_prompt.connect(_on_finisher_prompt)
     boss.contained.connect(_on_boss_contained)
 
 
 func _process(delta: float) -> void:
-    _start_capture_after_warmup(delta)
-    if not session.session_active and Input.is_action_just_pressed("ui_accept"):
-        _reset_run()
-        _start_session(false)
     _read_input(delta)
+    _start_capture_after_warmup(delta)
+    _update_onboarding(delta)
     session.advance(delta)
     _update_gameplay(delta)
     _update_presentation(delta)
     _capture_due_frames()
-    _impact_label_time = maxf(0.0, _impact_label_time - delta)
+    _impact_label_time = maxf(0.0, _impact_label_time - delta * session.time_scale)
+    _shot_feedback_time = maxf(0.0, _shot_feedback_time - delta * session.time_scale)
 
 
 func _unhandled_input(event: InputEvent) -> void:
     if not event is InputEventKey or not event.pressed or event.echo:
+        return
+    if not session.session_active and onboarding_mode == &"NAME_ENTRY" and event.keycode not in [KEY_F3, KEY_F4, KEY_F11, KEY_M]:
+        _handle_name_key(event)
+        return
+    if not session.session_active and onboarding_mode == &"READY" and event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+        if keyboard_only:
+            _begin_name_entry()
+        else:
+            hud.toast = "HOLD BOTH OPEN PALMS UNTIL THE LOCK COMPLETES"
+            hud.toast_time = 3.0
         return
     match event.keycode:
         KEY_F3:
@@ -109,6 +175,7 @@ func _unhandled_input(event: InputEvent) -> void:
         KEY_F4:
             keyboard_only = not keyboard_only
             hud.toast = "KEYBOARD MODE" if keyboard_only else "CAMERA MODE"
+            _tracking_loss_elapsed = 0.0
         KEY_F5:
             if hud.operator_visible:
                 operator_camera_id = maxi(0, operator_camera_id - 1)
@@ -138,11 +205,11 @@ func _unhandled_input(event: InputEvent) -> void:
         KEY_M:
             AudioServer.set_bus_mute(0, not AudioServer.is_bus_mute(0))
         KEY_R:
-            _reset_run()
-            _start_session(false)
+            if hud.operator_visible:
+                _request_session_start(false)
         KEY_C:
-            _reset_run()
-            _start_session(false)
+            if hud.operator_visible:
+                _request_session_start(false)
         KEY_B:
             if hud.operator_visible:
                 _reset_run()
@@ -159,7 +226,7 @@ func _unhandled_input(event: InputEvent) -> void:
                 hud.operator_page = 1 - hud.operator_page
         KEY_HOME:
             if hud.operator_visible:
-                session.reset_to_attract()
+                session.reset_to_attract("operator_home")
                 _reset_run()
                 hud.operator_visible = false
         KEY_DELETE:
@@ -182,69 +249,119 @@ func _unhandled_input(event: InputEvent) -> void:
 func _parse_arguments() -> void:
     var arguments := OS.get_cmdline_user_args()
     keyboard_only = "--keyboard-only" in arguments
+    vision_managed = "--vision-managed" in arguments
     capture_mode = "--capture-demo" in arguments
+    failure_demo = capture_mode and "--failure-demo" in arguments
     boss_test = "--boss-test" in arguments
     skip_calibration = "--skip-calibration" in arguments
+    for argument in arguments:
+        if argument.begins_with("--health-port="):
+            var parsed_port := int(argument.trim_prefix("--health-port="))
+            if parsed_port >= 1024 and parsed_port <= 65535:
+                _health_port = parsed_port
     if "--windowed" not in arguments:
         DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 
 
 func _read_input(delta: float) -> void:
     var packet_timeout := 1500 if capture_mode else 350
-    var use_vision := vision.is_fresh(packet_timeout) and not keyboard_only
-    actions = {
-        "move": 0.0,
-        "jump": false,
-        "crouch": false,
-        "dodge_left": false,
-        "dodge_right": false,
-        "shield": false,
-        "web_left": false,
-        "web_right": false,
-        "pull": 0.0,
-        "two_hand_pull": 0.0,
-    }
-    if use_vision:
+    if not capture_mode:
+        packet_timeout = PACKET_TIMEOUT_MS
+    var fresh := vision.is_fresh(packet_timeout)
+    actions = _keyboard_actions()
+    aim = _mouse_aim()
+    if fresh and not keyboard_only:
         var data := vision.latest
-        actions.move = float(data.get("move", 0.0))
-        actions.jump = bool(data.get("jump", false))
-        actions.crouch = bool(data.get("crouch", false))
-        actions.dodge_left = bool(data.get("dodge_left", false))
-        actions.dodge_right = bool(data.get("dodge_right", false))
-        actions.shield = bool(data.get("shield", false))
-        actions.web_left = bool(data.get("web_left", false))
-        actions.web_right = bool(data.get("web_right", false))
-        actions.pull = float(data.get("pull", 0.0))
-        actions.two_hand_pull = float(data.get("two_hand_pull", 0.0))
-        aim = Vector2(float(data.get("aim_x", 0.5)), float(data.get("aim_y", 0.5)))
         var tracked := bool(data.get("tracked", false))
+        _hand_count = int(data.get("hand_count", 0))
+        _player_tracked = tracked
+        if tracked:
+            actions.move = float(data.get("move", 0.0))
+            for key in ["jump", "crouch", "dodge_left", "dodge_right", "shield"]:
+                actions[key] = bool(actions[key]) or bool(data.get(key, false))
+        if _hand_count > 0:
+            actions.web_left = bool(actions.web_left) or bool(data.get("web_left", false))
+            actions.web_right = bool(actions.web_right) or bool(data.get("web_right", false))
+            actions.web_left_trigger = bool(actions.web_left_trigger) or bool(data.get("web_left_trigger", false))
+            actions.web_right_trigger = bool(actions.web_right_trigger) or bool(data.get("web_right_trigger", false))
+            actions.fist_left = bool(data.get("fist_left", false))
+            actions.fist_right = bool(data.get("fist_right", false))
+            actions.palm_open_left = bool(data.get("palm_open_left", false))
+            actions.palm_open_right = bool(data.get("palm_open_right", false))
+            actions.gesture_left = str(data.get("gesture_left", "OPEN"))
+            actions.gesture_right = str(data.get("gesture_right", "OPEN"))
+            actions.aim_left_x = float(data.get("aim_left_x", data.get("aim_x", 0.5)))
+            actions.aim_left_y = float(data.get("aim_left_y", data.get("aim_y", 0.5)))
+            actions.aim_right_x = float(data.get("aim_right_x", data.get("aim_x", 0.5)))
+            actions.aim_right_y = float(data.get("aim_right_y", data.get("aim_y", 0.5)))
+            actions.pull = maxf(float(actions.pull), float(data.get("pull", 0.0)))
+            actions.two_hand_pull = maxf(float(actions.two_hand_pull), float(data.get("two_hand_pull", 0.0)))
+            aim = Vector2(float(data.get("aim_x", 0.5)), float(data.get("aim_y", 0.5)))
         _tracking_loss_elapsed = 0.0 if tracked else _tracking_loss_elapsed + delta
-        hud.tracking = "VISION LINK  %.0f%%" % (float(data.get("pose_confidence", 0.0)) * 100.0)
+        hud.tracking = "VISION LINK  %.0f%%  |  HANDS %d/2" % [float(data.get("pose_confidence", 0.0)) * 100.0, _hand_count]
         if not tracked and session.session_active:
-            hud.toast = "RETURN TO THE SCAN ZONE"
+            hud.toast = "RETURN TO THE SCAN ZONE  |  KEYBOARD BACKUP ACTIVE"
     else:
+        _player_tracked = keyboard_only
+        _hand_count = 2 if keyboard_only else 0
         if not keyboard_only:
             _tracking_loss_elapsed += delta
             if session.session_active:
-                hud.toast = "CAMERA SIGNAL LOST  |  RECONNECTING..."
-        actions.move = Input.get_axis("move_left", "move_right")
-        actions.jump = Input.is_action_pressed("jump")
-        actions.crouch = Input.is_action_pressed("crouch")
-        actions.dodge_left = Input.is_action_pressed("dodge_left")
-        actions.dodge_right = Input.is_action_pressed("dodge_right")
-        actions.shield = Input.is_action_pressed("shield")
-        actions.web_left = Input.is_action_pressed("web_left")
-        actions.web_right = Input.is_action_pressed("web_right")
-        actions.pull = 1.0 if Input.is_action_pressed("pull") else 0.0
-        actions.two_hand_pull = actions.pull if actions.web_left and actions.web_right else 0.0
-        aim = get_viewport().get_mouse_position() / get_viewport().get_visible_rect().size
-        aim.x = clampf(aim.x, 0.05, 0.95)
-        aim.y = clampf(aim.y, 0.1, 0.9)
-        hud.tracking = "KEYBOARD / MOUSE"
-    if _tracking_loss_elapsed >= 6.0 and session.session_active and not keyboard_only:
-        session.reset_to_attract()
-        _reset_run()
+                hud.toast = "CAMERA SIGNAL LOST  |  KEYBOARD BACKUP ACTIVE"
+        hud.tracking = "KEYBOARD / MOUSE" if keyboard_only else "CAMERA RECONNECTING  |  KEYBOARD BACKUP ACTIVE"
+    if keyboard_only or capture_mode:
+        _camera_ready_dwell = READY_HOLD_SECONDS
+    elif fresh and _player_tracked and _hand_count >= 2:
+        if bool(actions.get("palm_open_left", false)) and bool(actions.get("palm_open_right", false)):
+            _camera_ready_dwell = minf(READY_HOLD_SECONDS, _camera_ready_dwell + delta)
+        else:
+            _camera_ready_dwell = maxf(0.0, _camera_ready_dwell - delta * 1.5)
+    else:
+        _camera_ready_dwell = 0.0
     move_value = float(actions.move)
+    actions.aim_x = aim.x
+    actions.aim_y = aim.y
+    var tracking_is_lost := session.session_active and not keyboard_only and _tracking_loss_elapsed >= 0.5
+    if tracking_is_lost != _tracking_was_lost:
+        print("VISION LINK %s  |  %.2fs" % ["LOST" if tracking_is_lost else "RECOVERED", session.elapsed])
+        _tracking_was_lost = tracking_is_lost
+
+
+func _keyboard_actions() -> Dictionary:
+    var keyboard_pull := 1.0 if Input.is_action_pressed("pull") else 0.0
+    var left_web := Input.is_action_pressed("web_left")
+    var right_web := Input.is_action_pressed("web_right")
+    return {
+        "move": Input.get_axis("move_left", "move_right"),
+        "jump": Input.is_action_pressed("jump"),
+        "crouch": Input.is_action_pressed("crouch"),
+        "dodge_left": Input.is_action_pressed("dodge_left"),
+        "dodge_right": Input.is_action_pressed("dodge_right"),
+        "shield": Input.is_action_pressed("shield"),
+        "web_left": left_web,
+        "web_right": right_web,
+        "web_left_trigger": Input.is_action_just_pressed("web_left"),
+        "web_right_trigger": Input.is_action_just_pressed("web_right"),
+        "fist_left": false,
+        "fist_right": false,
+        "palm_open_left": keyboard_only,
+        "palm_open_right": keyboard_only,
+        "aim_left_x": aim.x,
+        "aim_left_y": aim.y,
+        "aim_right_x": aim.x,
+        "aim_right_y": aim.y,
+        "gesture_left": "MOUSE" if left_web else "OPEN",
+        "gesture_right": "MOUSE" if right_web else "OPEN",
+        "pull": keyboard_pull,
+        "two_hand_pull": keyboard_pull if left_web and right_web else 0.0,
+    }
+
+
+func _mouse_aim() -> Vector2:
+    var value := get_viewport().get_mouse_position() / get_viewport().get_visible_rect().size
+    value.x = clampf(value.x, 0.05, 0.95)
+    value.y = clampf(value.y, 0.1, 0.9)
+    return value
 
 
 func _update_gameplay(delta: float) -> void:
@@ -252,9 +369,14 @@ func _update_gameplay(delta: float) -> void:
         web_pressure = minf(100.0, web_pressure + delta * 24.0)
         return
     var firing := bool(actions.web_left) or bool(actions.web_right)
-    if firing and not _was_firing:
-        chase.register_web_shot()
+    var left_trigger := bool(actions.get("web_left_trigger", false))
+    var right_trigger := bool(actions.get("web_right_trigger", false))
+    var shot_count := int(left_trigger) + int(right_trigger)
+    if shot_count > 0:
+        _shot_feedback_time = 0.75
         audio.play_effect("web_fire")
+        if session.state == SessionController.CHASE:
+            chase.register_web_shot()
     _was_firing = firing
     if firing and web_pressure > 0.0:
         web_pressure = maxf(0.0, web_pressure - delta * (15.0 - assist_level * 4.0))
@@ -265,9 +387,20 @@ func _update_gameplay(delta: float) -> void:
         actions.web_right = false
         hud.toast = "WEB PRESSURE RECHARGING"
     if session.state == SessionController.CHASE:
-        chase.update(session.elapsed, actions)
+        var chase_actions := actions
+        if failure_demo:
+            chase_actions = actions.duplicate()
+            for key in ["jump", "crouch", "dodge_left", "dodge_right", "shield", "web_left", "web_right", "web_left_trigger", "web_right_trigger"]:
+                chase_actions[key] = false
+            chase_actions.move = 0.0
+            chase_actions.pull = 0.0
+            chase_actions.two_hand_pull = 0.0
+        chase.update(session.elapsed, chase_actions)
     elif session.state in [SessionController.BOSS_COMBAT, SessionController.FINISHER]:
+        var counters_before := boss.successful_counters
         boss.update(session.elapsed, delta, actions)
+        if session.state == SessionController.BOSS_COMBAT and shot_count > 0 and boss.successful_counters == counters_before:
+            boss.register_web_shot(session.elapsed, aim, shot_count, assist_level)
 
 
 func _update_presentation(delta: float) -> void:
@@ -303,6 +436,25 @@ func _update_presentation(delta: float) -> void:
     hud.pose_confidence = float(telemetry.get("pose_confidence", 0.0))
     hud.hand_confidence = float(telemetry.get("hand_confidence", 0.0))
     hud.packet_age_ms = float(Time.get_ticks_msec() - vision.last_packet_ms) if vision.last_packet_ms >= 0 else -1.0
+    hud.camera_ready = keyboard_only or vision.is_fresh(PACKET_TIMEOUT_MS)
+    hud.player_tracked = keyboard_only or _player_tracked
+    hud.hand_count = _hand_count
+    hud.hands_ready = keyboard_only or capture_mode or _camera_ready_dwell >= READY_HOLD_SECONDS
+    hud.ready_hold_seconds = _camera_ready_dwell
+    hud.ready_hold_required = READY_HOLD_SECONDS
+    hud.onboarding_mode = onboarding_mode
+    hud.participant_name = player_name if not player_name.is_empty() else air_name.name
+    hud.air_strokes = air_name.strokes
+    hud.air_cursor = air_name.cursor
+    hud.air_pen_down = air_name.pen_down
+    hud.air_prediction = air_name.predicted_letter
+    hud.air_confidence = air_name.confidence
+    hud.name_confirm_hold = _name_confirm_hold
+    hud.name_confirm_required = NAME_CONFIRM_SECONDS
+    hud.keyboard_mode = keyboard_only
+    hud.vision_managed = vision_managed
+    hud.tracking_lost = session.session_active and not keyboard_only and _tracking_loss_elapsed >= 0.5
+    hud.tracking_loss_seconds = _tracking_loss_elapsed
     hud.body_action = _body_action_label()
     hud.hand_action = _hand_action_label()
     hud.active_particles = city.get_active_particles()
@@ -318,6 +470,20 @@ func _update_presentation(delta: float) -> void:
     hud.rescues = chase.rescues
     hud.perfect_dodges = chase.perfect_dodges
     hud.web_accuracy = chase.web_accuracy()
+    hud.spider_sense_score = _spider_sense_score()
+    hud.boss_control_score = _boss_control_score()
+    hud.target_locked = session.state == SessionController.BOSS_COMBAT and BossController.boss_target_locked(aim, assist_level)
+    hud.gesture_left = str(actions.get("gesture_left", "OPEN"))
+    hud.gesture_right = str(actions.get("gesture_right", "OPEN"))
+    hud.collision_strikes = collision_strikes
+    hud.max_collision_strikes = MAX_COLLISION_STRIKES
+    hud.mission_failed = mission_failed
+    if _shot_feedback_time > 0.0:
+        hud.shot_feedback = "SHOT FIRED"
+    elif session.state == SessionController.WEB_VERIFICATION and _hand_count > 0 and str(actions.get("gesture_left", "OPEN")) == "OPEN" and str(actions.get("gesture_right", "OPEN")) == "OPEN":
+        hud.shot_feedback = "POSE NOT RECOGNIZED"
+    else:
+        hud.shot_feedback = ""
     if capture_mode and _fps_samples.size() < 2400:
         _fps_samples.append(minf(240.0, 1.0 / maxf(delta, 0.0001)))
 
@@ -347,21 +513,25 @@ func _hand_action_label() -> String:
 
 func _on_challenge_started(kind: StringName, prompt: String, direction: StringName) -> void:
     hud.prompt = prompt
+    hud.instruction_hint = str(INSTRUCTION_HINTS.get(kind, "FOLLOW THE ACTION PROMPT"))
     hud.danger_direction = direction
     city.play_set_piece(kind)
     audio.play_effect("spider_sense")
 
 
 func _on_challenge_cleared(points: int, label: String) -> void:
+    print("CHASE CLEAR  %s  |  %.2fs" % [label, session.elapsed])
     score += ChaseDirector.score_with_combo(points, combo)
     combo = mini(8, combo + 1)
     assist_level = maxf(0.0, assist_level - 0.025)
     _show_impact(label)
     audio.play_effect("web_attach")
+    _clear_context_prompt()
 
 
 func _on_boss_attack(kind: StringName, prompt: String, direction: StringName) -> void:
     hud.prompt = prompt
+    hud.instruction_hint = str(INSTRUCTION_HINTS.get(kind, "FOLLOW THE ACTION PROMPT"))
     hud.danger_direction = direction
     city.play_set_piece(kind)
     audio.play_effect("spider_sense")
@@ -372,14 +542,31 @@ func _on_boss_counter(points: int, label: String) -> void:
     combo = mini(8, combo + 1)
     _show_impact(label)
     audio.play_effect("impact")
+    _clear_context_prompt()
 
 
-func _on_player_hit(damage: float) -> void:
+func _on_obstacle_hit(damage: float) -> void:
+    collision_strikes = mini(MAX_COLLISION_STRIKES, collision_strikes + 1)
+    print("CHASE MISS  strike=%d/%d  |  %.2fs" % [collision_strikes, MAX_COLLISION_STRIKES, session.elapsed])
+    if collision_limit_reached(collision_strikes) and not mission_failed:
+        mission_failed = true
+        combo = 1
+        hud.toast = "MISSION FAILED  |  TOO MANY COLLISIONS"
+        hud.toast_time = 4.0
+    _apply_damage(maxf(24.0, damage))
+
+
+func _on_boss_hit(damage: float) -> void:
+    _apply_damage(damage)
+
+
+func _apply_damage(damage: float) -> void:
     energy -= damage
     combo = 1
     assist_level = minf(1.0, assist_level + 0.12)
     hud.flash = 0.9
     audio.play_effect("impact")
+    _clear_context_prompt()
     if energy <= 0.0:
         energy = 25.0
         last_chance_used = true
@@ -388,17 +575,31 @@ func _on_player_hit(damage: float) -> void:
         hud.toast = "LAST CHANCE MODE  |  HERO SYSTEMS RESTORED"
 
 
+func _on_boss_web_hit(label: String) -> void:
+    score += 180
+    _show_impact(label)
+    city.play_set_piece(&"counter")
+    audio.play_effect("web_attach")
+
+
+func _on_boss_web_missed() -> void:
+    combo = 1
+    hud.toast = "WEB MISSED  |  CENTER BOTH HANDS ON THE TARGET"
+    hud.toast_time = 1.2
+
+
 func _on_boss_health_changed(value: float) -> void:
     hud.boss_health = value
 
 
 func _on_finisher_prompt(value: String) -> void:
     hud.prompt = value
+    hud.instruction_hint = "CAMERA: FIRE BOTH WEBS, CLOSE FISTS + PULL  |  KEYBOARD: HOLD BOTH MOUSE BUTTONS + P"
 
 
 func _on_boss_contained() -> void:
     score += 5000
-    _show_impact("THE VEIL CONTAINED")
+    _show_impact("THE VOID REGENT CONTAINED")
 
 
 func _show_impact(label: String) -> void:
@@ -407,36 +608,71 @@ func _show_impact(label: String) -> void:
     hud.flash = 0.45
 
 
-func _on_state_changed(_previous: StringName, current: StringName) -> void:
+func _clear_context_prompt() -> void:
     hud.prompt = ""
+    hud.instruction_hint = _state_instruction(session.state)
+    hud.danger_direction = &"center"
+
+
+func _on_state_changed(_previous: StringName, current: StringName) -> void:
+    print("SESSION STATE  %s -> %s  |  %.2fs" % [_previous, current, session.elapsed])
+    hud.prompt = ""
+    hud.instruction_hint = _state_instruction(current)
     hud.danger_direction = &"center"
     if current == SessionController.CHASE:
-        hud.prompt = "THE VEIL IS ESCAPING  |  STOP IT BEFORE THE CITY CORE"
+        hud.prompt = "GLIDER RAIDERS INBOUND  |  STOP THE VOID REGENT"
     elif current == SessionController.BOSS_INTRO:
-        hud.prompt = "UNKNOWN ENTITY LOCKED  |  THE VEIL"
+        hud.prompt = "COSMIC THREAT LOCKED  |  THE VOID REGENT"
         city.play_set_piece(&"boss_reveal")
     elif current == SessionController.FINISHER:
         hud.prompt = "BOTH HANDS FORWARD  |  FIRE BOTH WEBS"
     elif current == SessionController.RESULTS:
+        if not boss.final_contained:
+            boss.update(82.4, 5.0, {})
         _impact_label = ""
         _impact_label_time = 0.0
         hud.impact_label = ""
         hud.toast = ""
         hud.toast_time = 0.0
         _save_result_once()
+    elif current == SessionController.ATTRACT:
+        _reset_run()
+        _reset_onboarding()
+
+
+func _state_instruction(current: StringName) -> String:
+    match current:
+        SessionController.CALIBRATION:
+            return "STAND CENTERED WITH YOUR FULL UPPER BODY AND BOTH HANDS VISIBLE"
+        SessionController.WEB_VERIFICATION:
+            return "AIM WITH BOTH HANDS  |  CLASSIC WEB POSE, PINCH, OR CLENCH A FIST TO FIRE"
+        SessionController.CHASE:
+            return "LEAN TO MOVE  |  FOLLOW EACH RED ACTION PROMPT"
+        SessionController.BOSS_INTRO:
+            return "STAY CENTERED AND GET READY TO DODGE, SHIELD, AND ATTACK"
+        SessionController.BOSS_COMBAT:
+            return "KEEP TARGET LOCK, FIRE WEBS, AND RESPOND TO EACH COUNTER"
+        SessionController.FINISHER:
+            return "BOTH HANDS FORWARD, FIRE BOTH WEBS, THEN PULL BOTH ARMS BACK"
+    return ""
 
 
 func _save_result_once() -> void:
     if _result_saved:
         return
+    if mission_failed:
+        _result_saved = true
+        hud.leaderboard = saves.today_entries()
+        hud.daily_rank = 0
+        return
     score += int(boss.tension * 5000.0)
     saves.add_result({
-        "nickname": "",
-        "codename": "The Neon Weaver",
+        "nickname": player_name,
+        "codename": player_name if not player_name.is_empty() else "The Neon Weaver",
         "score": score,
         "web_accuracy": chase.web_accuracy(),
         "spider_sense": _spider_sense_score(),
-        "boss_control": mini(100, boss.successful_counters * 17),
+        "boss_control": _boss_control_score(),
         "final_tension": int(boss.tension * 100.0),
         "rescues": chase.rescues,
         "timestamp": Time.get_datetime_string_from_system(),
@@ -452,15 +688,39 @@ func _spider_sense_score() -> int:
     return mini(100, 55 + total * 7)
 
 
+func _boss_control_score() -> int:
+    return mini(100, boss.successful_counters * 17)
+
+
 func _start_capture_after_warmup(delta: float) -> void:
-    if not capture_mode or _attract_captured:
+    if not capture_mode or session.session_active:
         return
     _capture_warmup += delta
-    if _capture_warmup >= 0.75:
+    if not _attract_captured and _capture_warmup >= 0.75:
+        hud.ready_hold_seconds = 1.7
+        hud.hands_ready = false
         _save_capture("01_attract.png")
         _attract_captured = true
+        _prepare_air_name_capture()
+        return
+    if not _name_capture_captured and _capture_warmup >= 1.5:
+        _save_capture("01_air_name.png")
+        _name_capture_captured = true
+        return
+    if _name_capture_captured and _capture_warmup >= 2.0:
+        player_name = "THE NEON WEAVER"
+        onboarding_mode = &"IN_MISSION"
         _reset_run()
         _start_session(false)
+
+
+func _prepare_air_name_capture() -> void:
+    _begin_name_entry()
+    air_name.name = "AARA"
+    air_name.set_pen(Vector2(0.12, 0.12), true)
+    air_name.set_pen(Vector2(0.5, 0.88), true)
+    air_name.set_pen(Vector2(0.88, 0.12), true)
+    air_name.finish_stroke()
 
 
 func _capture_due_frames() -> void:
@@ -475,6 +735,8 @@ func _capture_due_frames() -> void:
 func _save_capture(file_name: String) -> void:
     var directory := ProjectSettings.globalize_path("res://../artifacts/screenshots")
     DirAccess.make_dir_recursive_absolute(directory)
+    if failure_demo and file_name == "13_results.png":
+        file_name = "13_failure_results.png"
     var image := get_viewport().get_texture().get_image()
     if image != null:
         image.save_png(directory.path_join(file_name))
@@ -487,25 +749,182 @@ func _reset_run() -> void:
     web_pressure = 100.0
     assist_level = 0.2
     last_chance_used = false
+    collision_strikes = 0
+    mission_failed = false
     _result_saved = false
     _was_firing = false
     _tracking_loss_elapsed = 0.0
+    _tracking_was_lost = false
+    _camera_ready_dwell = 0.0
     _impact_label = ""
     _impact_label_time = 0.0
+    _shot_feedback_time = 0.0
     chase.reset()
     boss.reset()
     city.reset_dynamic_objects()
 
 
 func _start_session(skip: bool = false) -> void:
-    _send_vision_command({"command": "sync_session"})
+    for _attempt in range(3):
+        _send_vision_command({"command": "sync_session"})
     session.start_session(skip)
+    print("SESSION START  mode=%s tracked=%s" % ["keyboard" if keyboard_only else "camera", _player_tracked])
+
+
+func _request_session_start(skip: bool = false) -> void:
+    var fresh := vision.is_fresh(PACKET_TIMEOUT_MS)
+    if not keyboard_only and not capture_mode and not camera_session_ready(
+        fresh,
+        _player_tracked,
+        _hand_count,
+        _camera_ready_dwell,
+        bool(actions.get("palm_open_left", false)),
+        bool(actions.get("palm_open_right", false))
+    ):
+        if not fresh:
+            hud.toast = "CAMERA RECONNECTING  |  WAIT OR PRESS F4 FOR KEYBOARD" if vision_managed else "CAMERA OFFLINE  |  START WITH run.bat OR PRESS F4 FOR KEYBOARD"
+        elif not _player_tracked:
+            hud.toast = "STEP INTO FRAME  |  KEEP YOUR FULL UPPER BODY VISIBLE"
+        else:
+            hud.toast = "SHOW BOTH OPEN PALMS  |  HOLD FOR THREE SECONDS"
+        hud.toast_time = 4.0
+        print("SESSION START BLOCKED  fresh=%s tracked=%s managed=%s" % [fresh, _player_tracked, vision_managed])
+        return
+    if skip:
+        _reset_run()
+        _start_session(true)
+    else:
+        _begin_name_entry()
+
+
+static func camera_session_ready(
+    packet_fresh: bool,
+    tracked: bool,
+    hand_count: int = 2,
+    ready_dwell: float = READY_HOLD_SECONDS,
+    left_open: bool = true,
+    right_open: bool = true
+) -> bool:
+    return packet_fresh and tracked and hand_count >= 2 and left_open and right_open and ready_dwell >= READY_HOLD_SECONDS
+
+
+func _update_onboarding(delta: float) -> void:
+    if session.session_active or capture_mode or boss_test or skip_calibration:
+        return
+    if onboarding_mode == &"READY":
+        if not keyboard_only and camera_session_ready(
+            vision.is_fresh(PACKET_TIMEOUT_MS),
+            _player_tracked,
+            _hand_count,
+            _camera_ready_dwell,
+            bool(actions.get("palm_open_left", false)),
+            bool(actions.get("palm_open_right", false))
+        ):
+            _begin_name_entry()
+        return
+    if onboarding_mode != &"NAME_ENTRY":
+        return
+    if keyboard_only:
+        return
+    _update_air_name(delta)
+
+
+func _begin_name_entry() -> void:
+    print("ONBOARDING  OPEN-PALM LOCK -> NAME ENTRY")
+    onboarding_mode = &"NAME_ENTRY"
+    air_name = AirNameEntry.new()
+    player_name = ""
+    _pinch_was_active = false
+    _clear_hold = 0.0
+    _clear_latched = false
+    _name_confirm_hold = 0.0
+    hud.toast = ""
+    hud.toast_time = 0.0
+
+
+func _update_air_name(delta: float) -> void:
+    var left_fist := bool(actions.get("fist_left", false))
+    var right_fist := bool(actions.get("fist_right", false))
+    var both_fists := left_fist and right_fist
+    if both_fists:
+        air_name.finish_stroke()
+        _clear_hold += delta
+        if _clear_hold >= NAME_CLEAR_SECONDS and not _clear_latched:
+            var clearing_ink := air_name.has_ink()
+            air_name.undo()
+            _clear_latched = true
+            hud.toast = "CURRENT LETTER CLEARED" if clearing_ink else "UNDO"
+            hud.toast_time = 1.0
+    else:
+        _clear_hold = 0.0
+        _clear_latched = false
+        var use_right := right_fist or (not left_fist and _hand_count >= 2)
+        var cursor_target := Vector2(
+            float(actions.get("aim_right_x" if use_right else "aim_left_x", 0.5)),
+            float(actions.get("aim_right_y" if use_right else "aim_left_y", 0.5))
+        )
+        var smoothed := air_name.cursor.lerp(cursor_target, clampf(delta * 14.0, 0.0, 1.0))
+        air_name.set_pen(smoothed, left_fist != right_fist)
+        if not left_fist and not right_fist:
+            air_name.finish_stroke()
+    var pinch_active := str(actions.get("gesture_left", "OPEN")) == "PINCH" or str(actions.get("gesture_right", "OPEN")) == "PINCH"
+    if pinch_active and not _pinch_was_active and air_name.has_ink():
+        if air_name.accept_prediction():
+            hud.toast = "LETTER ACCEPTED"
+        else:
+            hud.toast = "DRAW A LARGER UPPERCASE BLOCK LETTER"
+        hud.toast_time = 1.2
+    _pinch_was_active = pinch_active
+    var both_open := bool(actions.get("palm_open_left", false)) and bool(actions.get("palm_open_right", false))
+    if both_open and not air_name.has_ink() and not air_name.name.is_empty():
+        _name_confirm_hold = minf(NAME_CONFIRM_SECONDS, _name_confirm_hold + delta)
+        if _name_confirm_hold >= NAME_CONFIRM_SECONDS:
+            _confirm_air_name()
+    else:
+        _name_confirm_hold = 0.0
+
+
+func _handle_name_key(event: InputEventKey) -> void:
+    if event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+        if not air_name.name.is_empty():
+            _confirm_air_name()
+        else:
+            hud.toast = "TYPE YOUR NAME, THEN PRESS ENTER"
+        return
+    if event.keycode == KEY_BACKSPACE:
+        air_name.undo()
+        return
+    if event.unicode > 0:
+        air_name.append_typed(String.chr(event.unicode))
+
+
+func _confirm_air_name() -> void:
+    if air_name.name.is_empty():
+        return
+    player_name = air_name.name.left(AirNameEntry.MAX_NAME_LENGTH)
+    onboarding_mode = &"IN_MISSION"
+    _reset_run()
+    _start_session(false)
+
+
+func _reset_onboarding() -> void:
+    onboarding_mode = &"READY"
+    player_name = ""
+    air_name = AirNameEntry.new()
+    _camera_ready_dwell = 0.0
+    _pinch_was_active = false
+    _clear_hold = 0.0
+    _clear_latched = false
+    _name_confirm_hold = 0.0
+
+
+static func collision_limit_reached(strikes: int, limit: int = MAX_COLLISION_STRIKES) -> bool:
+    return strikes >= maxi(1, limit)
 
 func _send_vision_command(command: Dictionary) -> void:
-    var peer := PacketPeerUDP.new()
-    var error := peer.connect_to_host("127.0.0.1", 42421)
+    var error := _vision_command_peer.connect_to_host("127.0.0.1", _health_port)
     if error == OK:
-        peer.put_packet(JSON.stringify(command).to_utf8_buffer())
+        _vision_command_peer.put_packet(JSON.stringify(command).to_utf8_buffer())
 
 func _toggle_fullscreen() -> void:
     var mode := DisplayServer.window_get_mode()

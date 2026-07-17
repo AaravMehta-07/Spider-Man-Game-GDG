@@ -17,6 +17,9 @@ var _boss_shadow: MeshInstance3D
 var _gpu_rain: GPUParticles3D
 var _traffic_follow: PathFollow3D
 var _animation_player: AnimationPlayer
+var _boss_reaction_offset := Vector3.ZERO
+var _boss_reaction_rotation := Vector3.ZERO
+var _boss_reaction_time := 0.0
 var low_quality := false
 var _rng := RandomNumberGenerator.new()
 
@@ -62,6 +65,9 @@ func reset_dynamic_objects() -> void:
     _set_pieces.clear()
     boss_health = 100.0
     boss_tension = 0.0
+    _boss_reaction_offset = Vector3.ZERO
+    _boss_reaction_rotation = Vector3.ZERO
+    _boss_reaction_time = 0.0
 
 
 func play_set_piece(kind: StringName) -> void:
@@ -113,7 +119,7 @@ func _move_rain(delta: float) -> void:
             )
 
 
-func _update_boss(_delta: float) -> void:
+func _update_boss(delta: float) -> void:
     var visible := mission_state in [&"BOSS_INTRO", &"BOSS_COMBAT", &"FINISHER"]
     _boss.visible = visible
     _boss_shadow.visible = visible
@@ -121,9 +127,11 @@ func _update_boss(_delta: float) -> void:
         strand.visible = mission_state == &"FINISHER"
     if not visible:
         return
+    _boss_reaction_time = maxf(0.0, _boss_reaction_time - delta)
+    var reaction_weight := clampf(_boss_reaction_time / 0.35, 0.0, 1.0)
     var time := Time.get_ticks_msec() * 0.001
-    _boss.position = Vector3(sin(time * 1.7) * 1.45, 6.1 + sin(time * 2.1) * 0.28, -16.0)
-    _boss.rotation = Vector3(0, sin(time * 0.9) * 0.2, sin(time * 1.4) * 0.05)
+    _boss.position = Vector3(sin(time * 1.7) * 1.45, 6.1 + sin(time * 2.1) * 0.28, -16.0) + _boss_reaction_offset * reaction_weight
+    _boss.rotation = Vector3(0, sin(time * 0.9) * 0.2, sin(time * 1.4) * 0.05) + _boss_reaction_rotation * reaction_weight
     _boss.scale = Vector3.ONE * (1.0 - boss_tension * 0.22)
     _boss_shadow.position = Vector3(_boss.position.x * 0.7, 0.02, _boss.position.z + 1.7)
     var damage := 1.0 - boss_health / 100.0
@@ -221,23 +229,37 @@ func _build_city() -> void:
         var root := Node3D.new()
         add_child(root)
         root.position.z = 20.0 - section * 42.0
-        _box(Vector3(16.0, 0.35, 42.0), Color(0.025, 0.028, 0.034), Vector3(0, -0.2, 0), root, 0.05, 0.92)
+        _box(Vector3(16.0, 0.35, 42.0), Color(0.022, 0.026, 0.032), Vector3(0, -0.2, 0), root, 0.04, 0.76)
+        _box(Vector3(0.16, 0.025, 42.0), Color(0.08, 0.32, 0.4), Vector3(0, 0.0, 0), root, 0.15, 0.24)
         for side in [-1, 1]:
             _box(Vector3(3.7, 0.45, 42.0), Color(0.19, 0.2, 0.21), Vector3(float(side) * 9.8, 0.02, 0), root, 0.0, 0.85)
             _box(Vector3(0.3, 0.62, 42.0), Color(0.42, 0.43, 0.42), Vector3(float(side) * 8.08, 0.12, 0), root)
         for lane in [-1, 1]:
             for dash in range(7):
                 _box(Vector3(0.13, 0.025, 2.7), Color(0.82, 0.79, 0.58), Vector3(float(lane) * 2.65, 0.0, -17.5 + dash * 5.8), root)
+        for puddle_index in range(4):
+            var puddle := _box(
+                Vector3(1.4 + puddle_index * 0.22, 0.012, 2.1),
+                Color(0.04, 0.16, 0.23, 0.62),
+                Vector3(-5.5 + puddle_index * 3.7, 0.018, -14.0 + puddle_index * 8.4),
+                root, 0.65, 0.08
+            )
+            puddle.rotation.y = 0.15 * puddle_index
+        if section % 2 == 0:
+            for stripe in range(8):
+                _box(Vector3(1.25, 0.028, 0.42), Color(0.78, 0.8, 0.76), Vector3(-5.3 + stripe * 1.52, 0.025, 13.5), root, 0.05, 0.42)
+        var manhole := _torus(0.72, 0.09, Color(0.18, 0.2, 0.21), Vector3(3.8, 0.03, -8.0), root)
+        manhole.rotation.x = PI * 0.5
         _chunks.append(root)
     for side in [-1, 1]:
         for index in range(20):
             var building := _make_building(side, index)
             building.position.z = 18.0 - index * 10.5 + _rng.randf_range(-1.5, 1.5)
             _chunks.append(building)
-    for index in range(15):
+    for index in range(20):
         var side := -1 if index % 2 == 0 else 1
-        var prop := _make_street_prop(index % 4, side)
-        prop.position.z = 15.0 - index * 12.5
+        var prop := _make_street_prop(index % 5, side)
+        prop.position.z = 15.0 - index * 9.5
         _props.append(prop)
 
 
@@ -251,6 +273,8 @@ func _make_building(side: int, index: int) -> Node3D:
     root.position.x = float(side) * (12.5 + width * 0.5 + _rng.randf_range(0.0, 2.5))
     _box(Vector3(width, height, depth), colors[index % colors.size()], Vector3(0, height * 0.5, 0), root, 0.05, 0.78)
     _box(Vector3(width * 0.93, 0.45, depth * 0.9), colors[index % colors.size()].lightened(0.08), Vector3(0, height + 0.2, 0), root)
+    for corner_z in [-1, 1]:
+        _box(Vector3(0.18, height * 0.94, 0.18), Color(0.28, 0.3, 0.32), Vector3(-float(side) * width * 0.515, height * 0.5, float(corner_z) * depth * 0.44), root, 0.45, 0.3)
     var facade_x := -float(side) * width * 0.505
     var floors := mini(8, int(height / 3.2))
     for floor_index in range(1, floors):
@@ -269,6 +293,10 @@ func _make_building(side: int, index: int) -> Node3D:
             for leg_z in [-0.55, 0.55]:
                 _cylinder(0.06, 2.0, Color(0.13, 0.14, 0.14), Vector3(leg_x, height + 1.0, leg_z), root, 8)
         _cylinder(1.2, 1.8, Color(0.25, 0.22, 0.19), Vector3(0, height + 2.6, 0), root, 18)
+    if index % 3 == 0:
+        var sign_color := Color(0.05, 0.72, 1.0) if index % 2 == 0 else Color(1.0, 0.05, 0.22)
+        var sign := _box(Vector3(0.12, 2.4, 3.6), sign_color, Vector3(facade_x - float(side) * 0.12, height * 0.62, 0), root, 0.25, 0.18)
+        _set_emission(sign, sign_color, 3.5)
     return root
 
 
@@ -286,6 +314,9 @@ func _make_street_prop(kind: int, side: int) -> Node3D:
             _make_dumpster(root)
         3:
             _make_hydrant(root)
+        4:
+            _make_bus(root, Color(0.06, 0.34, 0.55))
+            root.position.x = float(side) * 5.4
     return root
 
 
@@ -303,32 +334,47 @@ func _build_rain() -> void:
 
 func _build_boss() -> void:
     _boss = Node3D.new()
-    _boss.name = "TheVeil"
+    _boss.name = "VoidRegent"
     add_child(_boss)
     _boss_material = ShaderMaterial.new()
     _boss_material.shader = load("res://shaders/boss_distortion.gdshader")
+    _boss_material.set_shader_parameter("veil_color", Color(0.018, 0.08, 0.095, 0.9))
+    _boss_material.set_shader_parameter("crack_color", Color(1.0, 0.03, 0.25, 1.0))
     var torso := _sphere(1.35, Color.WHITE, Vector3(0, 0.7, 0), _boss, 28, 18, _boss_material)
     torso.scale = Vector3(1.18, 1.55, 0.72)
     var head := _sphere(0.72, Color.WHITE, Vector3(0, 2.6, 0), _boss, 24, 16, _boss_material)
     head.scale = Vector3(0.86, 1.12, 0.78)
+    _box(Vector3(2.45, 1.05, 0.48), Color(0.07, 0.32, 0.38), Vector3(0, 1.35, 0.72), _boss, 0.82, 0.18)
+    _box(Vector3(1.75, 1.45, 0.38), Color(0.11, 0.14, 0.18), Vector3(0, 0.1, 0.82), _boss, 0.78, 0.22)
+    _box(Vector3(2.7, 0.38, 0.48), Color(0.62, 0.08, 0.16), Vector3(0, -0.65, 0.68), _boss, 0.68, 0.2)
+    for crown_side in [-1, 1]:
+        var crown := _cylinder(0.12, 1.15, Color(0.1, 0.52, 0.58), Vector3(float(crown_side) * 0.5, 3.45, -0.05), _boss, 8)
+        crown.rotation.z = -float(crown_side) * 0.35
     for side in [-1, 1]:
         var shoulder := _sphere(0.58, Color.WHITE, Vector3(float(side) * 1.12, 1.35, 0), _boss, 18, 12, _boss_material)
         shoulder.scale = Vector3(1.15, 0.9, 0.9)
+        var pauldron := _sphere(0.72, Color(0.08, 0.38, 0.44), Vector3(float(side) * 1.35, 1.48, 0.15), _boss, 16, 10)
+        pauldron.scale = Vector3(1.2, 0.58, 1.05)
         var upper_arm := _cylinder(0.42, 2.15, Color.WHITE, Vector3(float(side) * 1.58, 0.32, 0), _boss, 16, _boss_material)
         upper_arm.rotation.z = float(side) * 0.42
         var forearm := _cylinder(0.32, 2.25, Color.WHITE, Vector3(float(side) * 2.18, -1.45, -0.05), _boss, 16, _boss_material)
         forearm.rotation.z = float(side) * 0.2
+        var gauntlet := _cylinder(0.46, 1.0, Color(0.09, 0.34, 0.38), Vector3(float(side) * 2.32, -2.0, 0.15), _boss, 12)
+        gauntlet.rotation.z = float(side) * 0.2
         _make_claw(_boss, Vector3(float(side) * 2.42, -2.65, -0.1), side)
         var thigh := _cylinder(0.48, 2.45, Color.WHITE, Vector3(float(side) * 0.58, -1.35, 0), _boss, 18, _boss_material)
         thigh.rotation.z = -float(side) * 0.08
         var shin := _cylinder(0.35, 2.5, Color.WHITE, Vector3(float(side) * 0.7, -3.65, 0.08), _boss, 16, _boss_material)
         shin.rotation.z = float(side) * 0.04
+        _box(Vector3(0.92, 1.7, 0.72), Color(0.075, 0.27, 0.32), Vector3(float(side) * 0.7, -3.45, 0.45), _boss, 0.76, 0.22)
         var eye := _sphere(0.2, Color(1.0, 0.05, 0.12), Vector3(float(side) * 0.26, 2.72, 0.58), _boss, 12, 8)
         eye.scale = Vector3(0.6, 1.65, 0.28)
         _set_emission(eye, Color(1.0, 0.01, 0.08), 7.0)
     var chest := _sphere(0.36, Color(1.0, 0.04, 0.1), Vector3(0, 0.95, 1.0), _boss, 16, 10)
     chest.scale = Vector3(1.0, 1.5, 0.3)
     _set_emission(chest, Color(1.0, 0.01, 0.08), 5.0)
+    var faceplate := _box(Vector3(0.82, 0.62, 0.22), Color(0.08, 0.4, 0.46), Vector3(0, 2.45, 0.64), _boss, 0.8, 0.16)
+    faceplate.rotation.x = -0.08
     for strand_index in range(6):
         var strand := _cylinder(0.055, 3.5 + strand_index * 0.28, Color.WHITE, Vector3(0, 0.4, -0.45), _boss, 8, _boss_material)
         strand.rotation = Vector3(0.4 + strand_index * 0.19, strand_index * TAU / 6.0, 0.3)
@@ -356,6 +402,45 @@ func _spawn_piece(kind: StringName) -> void:
     piece.position = Vector3(player_lane * 3.0, 0.0, -48.0)
     add_child(piece)
     match kind:
+        &"billboard":
+            _box(Vector3(8.5, 3.8, 0.35), Color(0.7, 0.04, 0.08), Vector3(0, 4.2, 0), piece, 0.25, 0.38)
+            var billboard_core := _box(Vector3(6.8, 2.1, 0.12), Color(0.03, 0.56, 0.82), Vector3(0, 4.2, 0.24), piece, 0.1, 0.18)
+            _set_emission(billboard_core, Color(0.02, 0.45, 0.9), 2.4)
+            for edge_x in [-4.3, 4.3]:
+                _box(Vector3(0.2, 4.2, 0.55), Color(0.12, 0.13, 0.15), Vector3(edge_x, 4.2, 0), piece)
+            for side in [-1, 1]:
+                _cylinder(0.12, 5.0, Color(0.18, 0.19, 0.2), Vector3(float(side) * 3.5, 2.5, 0), piece, 10)
+            piece.position = Vector3(3.2, 0.0, -48.0)
+            piece.rotation.z = -0.35
+        &"vent":
+            _box(Vector3(4.6, 1.8, 3.2), Color(0.25, 0.28, 0.3), Vector3(0, 0.9, 0), piece, 0.65, 0.3)
+            _box(Vector3(3.8, 0.18, 2.6), Color(0.08, 0.1, 0.12), Vector3(0, 1.85, 0), piece)
+            var fan := _torus(0.92, 0.1, Color(0.08, 0.1, 0.12), Vector3(0, 1.96, 0), piece)
+            fan.rotation.x = PI * 0.5
+            for blade_index in range(4):
+                var blade := _box(Vector3(0.15, 0.05, 1.35), Color(0.4, 0.44, 0.46), Vector3(0, 2.0, 0), piece)
+                blade.rotation.y = blade_index * PI * 0.5
+        &"barrier":
+            _make_rubble(piece)
+            _box(Vector3(8.0, 2.2, 1.0), Color(0.38, 0.34, 0.28), Vector3(0, 1.1, 0), piece, 0.05, 0.9)
+            for stripe in range(7):
+                var warning := _box(Vector3(0.65, 0.12, 1.06), Color(1.0, 0.56, 0.04), Vector3(-3.1 + stripe * 1.02, 1.25, 0), piece, 0.1, 0.25)
+                warning.rotation.z = -0.55
+        &"swing":
+            _cylinder(0.22, 8.5, Color(0.24, 0.26, 0.28), Vector3(0, 4.25, 0), piece, 14)
+            var anchor := _sphere(0.55, Color(0.08, 0.65, 1.0), Vector3(0, 8.4, 0), piece, 16, 10)
+            _set_emission(anchor, Color(0.05, 0.55, 1.0), 5.0)
+            piece.position = Vector3(-4.8, 0.0, -45.0)
+        &"crane":
+            _cylinder(0.18, 9.0, Color(0.45, 0.4, 0.08), Vector3(0, 4.5, 0), piece, 12)
+            _box(Vector3(10.0, 0.28, 0.3), Color(0.8, 0.68, 0.08), Vector3(-3.8, 8.8, 0), piece, 0.35, 0.42)
+            piece.position = Vector3(-5.5, 0.0, -49.0)
+            piece.set_meta("lateral_speed", 2.2)
+        &"collapse":
+            _make_rubble(piece)
+            for index in range(4):
+                var slab := _box(Vector3(3.5, 0.45, 2.0), Color(0.3, 0.29, 0.28), Vector3(-4.5 + index * 3.0, 1.0 + index * 0.5, 0), piece, 0.05, 0.9)
+                slab.rotation.z = -0.25 + index * 0.16
         &"car":
             _make_car(piece, Color(0.92, 0.55, 0.035), true)
             piece.position = Vector3(3.6, 2.4, -49.0)
@@ -364,9 +449,11 @@ func _spawn_piece(kind: StringName) -> void:
             piece.set_meta("gravity", -5.2)
             piece.set_meta("spin", Vector3(1.5, 2.2, -1.0))
         &"drone":
-            _make_drone(piece)
-            piece.position.y = 5.7
-            piece.set_meta("spin", Vector3(0.0, 1.6, 0.25))
+            _make_glider_raider(piece)
+            piece.position = Vector3(player_lane * 2.4, 5.7, -32.0)
+            piece.scale = Vector3.ONE * 1.35
+            piece.set_meta("lateral_speed", -1.2 if player_lane > 0.0 else 1.2)
+            piece.set_meta("wobble", 1.2)
         &"bicycle":
             _make_bicycle(piece)
             piece.position = Vector3(player_lane * 2.8, 0.95, -47.0)
@@ -421,6 +508,41 @@ func _make_car(parent: Node3D, paint: Color, airborne: bool) -> void:
         var lamp_color := Color(1.0, 0.12, 0.04) if airborne else Color(1.0, 0.88, 0.58)
         var lamp := _sphere(0.12, lamp_color, Vector3(1.88, 0.82, z), parent, 10, 6)
         _set_emission(lamp, lamp_color, 4.0)
+
+
+func _make_bus(parent: Node3D, paint: Color) -> void:
+    _box(Vector3(6.8, 2.5, 2.35), paint, Vector3(0, 1.55, 0), parent, 0.45, 0.34)
+    _box(Vector3(6.25, 0.38, 2.1), paint.lightened(0.12), Vector3(-0.1, 3.0, 0), parent, 0.34, 0.28)
+    for window_index in range(5):
+        for side in [-1, 1]:
+            var window := _box(Vector3(0.82, 0.72, 0.045), Color(0.025, 0.12, 0.18), Vector3(-2.35 + window_index * 1.18, 2.12, float(side) * 1.19), parent, 0.1, 0.08)
+            _set_emission(window, Color(0.05, 0.2, 0.28), 0.7)
+    _box(Vector3(0.08, 1.35, 1.72), Color(0.025, 0.11, 0.16), Vector3(3.42, 2.0, 0), parent, 0.1, 0.08)
+    for x in [-2.35, 2.25]:
+        for z in [-1.13, 1.13]:
+            var wheel := _cylinder(0.48, 0.24, Color(0.018, 0.02, 0.024), Vector3(x, 0.52, z), parent, 18)
+            wheel.rotation.x = PI * 0.5
+    for z in [-0.78, 0.78]:
+        var headlight := _sphere(0.14, Color(0.95, 0.86, 0.55), Vector3(3.45, 1.05, z), parent, 10, 6)
+        _set_emission(headlight, Color(1.0, 0.78, 0.35), 4.0)
+
+
+func _make_glider_raider(parent: Node3D) -> void:
+    var glider := _box(Vector3(4.8, 0.18, 1.25), Color(0.08, 0.13, 0.17), Vector3(0, -0.55, 0), parent, 0.7, 0.2)
+    glider.rotation.z = 0.08
+    for side in [-1, 1]:
+        var wing := _box(Vector3(2.1, 0.1, 1.65), Color(0.12, 0.48, 0.55), Vector3(float(side) * 2.05, -0.48, 0), parent, 0.68, 0.18)
+        wing.rotation.z = -float(side) * 0.22
+        var thruster := _sphere(0.22, Color(0.08, 0.7, 1.0), Vector3(float(side) * 2.25, -0.58, -0.75), parent, 12, 7)
+        _set_emission(thruster, Color(0.02, 0.62, 1.0), 6.0)
+    _cylinder(0.42, 1.5, Color(0.14, 0.18, 0.2), Vector3(0, 0.45, 0), parent, 14)
+    var helmet := _sphere(0.38, Color(0.06, 0.075, 0.09), Vector3(0, 1.48, 0), parent, 16, 10)
+    helmet.scale = Vector3(0.9, 1.05, 0.86)
+    var visor := _box(Vector3(0.52, 0.12, 0.48), Color(1.0, 0.05, 0.18), Vector3(0, 1.52, 0.32), parent, 0.2, 0.12)
+    _set_emission(visor, Color(1.0, 0.02, 0.12), 5.0)
+    for side in [-1, 1]:
+        var arm := _cylinder(0.11, 1.3, Color(0.12, 0.15, 0.18), Vector3(float(side) * 0.7, 0.48, 0), parent, 10)
+        arm.rotation.z = float(side) * 0.9
 
 
 func _make_drone(parent: Node3D) -> void:
@@ -516,12 +638,22 @@ func _pulse_boss(kind: StringName) -> void:
     if not is_instance_valid(_boss):
         return
     _boss_material.set_shader_parameter("pulse", 7.0)
+    _boss_reaction_time = 0.35
+    _boss_reaction_offset = Vector3.ZERO
+    _boss_reaction_rotation = Vector3.ZERO
     if kind == &"energy":
         _spawn_piece(&"shockwave")
+        _boss_reaction_offset = Vector3(0, 0, 1.2)
     elif kind == &"right_slash":
-        _boss.rotation.z = -0.22
+        _boss_reaction_rotation.z = -0.32
     elif kind == &"overhead":
-        _boss.rotation.x = -0.12
+        _boss_reaction_rotation.x = -0.22
+    elif kind == &"counter":
+        _boss_reaction_offset = Vector3(0, 0.5, -0.8)
+    elif kind == &"debris":
+        _boss_reaction_rotation.y = 0.35
+    elif kind == &"ground_wave":
+        _boss_reaction_offset = Vector3(0, -0.6, 0)
 
 
 func _beam_between(parent: Node3D, start: Vector3, finish: Vector3, radius: float, color: Color) -> MeshInstance3D:

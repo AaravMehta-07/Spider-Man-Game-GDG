@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from time import monotonic
 
-from vision.hand_features import HandLandmark, aim_point, is_fist, is_pinching, is_web_pose
+from vision.hand_features import (
+    HandLandmark,
+    aim_point,
+    is_fist,
+    is_open_palm,
+    is_pinching,
+    is_web_pose,
+)
 
 
 @dataclass(slots=True)
@@ -14,29 +22,86 @@ class WebActions:
     aim_x: float
     aim_y: float
     pull: float
+    gesture: str
+    open_palm: bool = False
 
 
 class WebGestureClassifier:
-    def __init__(self) -> None:
+    def __init__(self, pull_velocity: float = 0.35, release_grace: float = 0.14) -> None:
         self._active = False
         self._last_fist = False
         self._last_wrist_y: float | None = None
+        self._last_time: float | None = None
+        self._missing_frames = 0
+        self._last_web_signal = False
+        self._release_started: float | None = None
+        self._cooldown_until = 0.0
+        self.pull_velocity = max(0.05, pull_velocity)
+        self.release_grace = max(0.05, release_grace)
 
-    def classify(self, points: Sequence[HandLandmark]) -> WebActions:
+    def classify(
+        self, points: Sequence[HandLandmark], timestamp: float | None = None
+    ) -> WebActions:
+        now = monotonic() if timestamp is None else timestamp
         fist = is_fist(points)
-        active = is_web_pose(points) or is_pinching(points) or (self._last_fist and not fist)
-        trigger = active and not self._active
+        web_pose = is_web_pose(points)
+        pinch = is_pinching(points)
+        web_signal = web_pose or pinch
+        was_active = self._active
+        fist_edge = fist and not self._last_fist
+        trigger_candidate = not was_active and (
+            (web_signal and not self._last_web_signal) or fist_edge
+        )
+        trigger = trigger_candidate and now >= self._cooldown_until
+        if trigger:
+            self._cooldown_until = now + 0.22
+        if web_signal or fist:
+            active = was_active or web_signal or fist_edge
+            self._release_started = None
+        elif was_active:
+            if self._release_started is None:
+                self._release_started = now
+            active = now - self._release_started < self.release_grace
+        else:
+            active = False
         wrist_y = points[0].y
         pull = 0.0
-        if fist and self._last_wrist_y is not None:
-            pull = max(0.0, min(1.0, (wrist_y - self._last_wrist_y) * 8.0))
+        if fist and active and self._last_wrist_y is not None and self._last_time is not None:
+            elapsed = max(0.001, now - self._last_time)
+            velocity = (wrist_y - self._last_wrist_y) / elapsed
+            pull = max(0.0, min(1.0, velocity / self.pull_velocity))
         self._active = active
         self._last_fist = fist
+        self._last_web_signal = web_signal
         self._last_wrist_y = wrist_y
+        self._last_time = now
+        self._missing_frames = 0
         x, y = aim_point(points)
-        return WebActions(trigger, active, fist, x, y, pull)
+        if fist and was_active:
+            gesture = "PULL"
+        elif fist:
+            gesture = "FIST_SHOT"
+        elif web_pose:
+            gesture = "SPIDER_POSE"
+        elif pinch:
+            gesture = "PINCH"
+        elif active:
+            gesture = "WEB_HELD"
+        else:
+            gesture = "OPEN"
+        return WebActions(trigger, active, fist, x, y, pull, gesture, is_open_palm(points))
+
+    def mark_missing(self) -> None:
+        self._missing_frames += 1
+        if self._missing_frames >= 3:
+            self.reset()
 
     def reset(self) -> None:
         self._active = False
         self._last_fist = False
         self._last_wrist_y = None
+        self._last_time = None
+        self._missing_frames = 0
+        self._last_web_signal = False
+        self._release_started = None
+        self._cooldown_until = 0.0

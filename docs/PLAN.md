@@ -20,7 +20,7 @@ rendering, gameplay, timing, persistence, and presentation.
 4. **Continuous chase**: author the city timeline, movement challenges,
    Spider-Sense warnings, web targeting and pressure, drones, barriers, anchors,
    swing, rescues, destruction, health, scoring, and adaptation.
-5. **The Veil**: transition without loading, render distortion and readable
+5. **The Void Regent**: transition without loading, render distortion and readable
    counter tells, implement defensive responses, counter-web hits, debris sling,
    and an assisted two-hand web-pull finisher.
 6. **Presentation**: build attract, calibration, HUD, results and recruitment
@@ -55,4 +55,3 @@ action interface as live vision.
   evidence; images are manually inspected before visual completion is claimed.
 - `Build/WebProtocol.exe` must exist and launch before export is marked complete.
 - Webcam and six-hour event claims require actual hardware/soak evidence.
-

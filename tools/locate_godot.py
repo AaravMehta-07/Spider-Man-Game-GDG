@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -44,7 +45,20 @@ def godot_version(executable: Path) -> str:
 
 
 if __name__ == "__main__":
-    found = locate_godot()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--configured")
+    parser.add_argument("--project-root", type=Path)
+    arguments = parser.parse_args()
+    configured = arguments.configured
+    if arguments.project_root is not None:
+        import sys
+
+        sys.path.insert(0, str(arguments.project_root))
+        from web_protocol.config import ProjectConfig
+
+        config = ProjectConfig.load(arguments.project_root)
+        configured = str(config.section("game").get("godot_executable") or configured or "")
+    found = locate_godot(configured or None)
     print(
         json.dumps(
             {

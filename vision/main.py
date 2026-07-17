@@ -6,18 +6,19 @@ import signal
 import socket
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from time import monotonic, sleep
 from uuid import uuid4
 
-import cv2
-
-from vision.camera_service import CameraService
-from vision.hand_service import HandService
 from vision.health_server import HealthState, UdpHealthServer
 from vision.movement_classifier import BodyActions, MovementClassifier
-from vision.pose_features import PoseFeatures, calibration_from_samples, extract_pose
-from vision.pose_service import PoseService
+from vision.pose_features import (
+    CalibrationProfile,
+    PoseFeatures,
+    calibration_from_samples,
+    extract_pose,
+)
 from vision.protocol import InputSnapshot, encode_snapshot
 from vision.simulator import ScriptedPlayer
 from vision.web_gesture_classifier import WebActions, WebGestureClassifier
@@ -31,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--time-scale", type=float, default=1.0)
     parser.add_argument("--camera", type=int)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--instance-id")
     return parser
 
 
@@ -39,14 +41,21 @@ def run_simulator(
     stop: threading.Event,
     logger: logging.Logger,
     time_scale: float = 1.0,
+    instance_id: str | None = None,
 ) -> int:
     game = config.section("game")
     network = config.section("network")
     host, port = str(game["udp_host"]), int(game["udp_port"])
-    health = HealthState(ready=True, mode="simulated")
+    health = HealthState(
+        mode="starting",
+        selected_camera=-1,
+        calibrated=True,
+        calibration_samples=24,
+        instance_id=instance_id or uuid4().hex,
+    )
     server = UdpHealthServer(host, int(game["health_port"]), health)
     server.start()
-    player = ScriptedPlayer()
+    player = ScriptedPlayer(session_id=uuid4().hex)
     interval = 1.0 / float(network["snapshot_hz"])
     started = monotonic()
     next_packet = started
@@ -61,30 +70,57 @@ def run_simulator(
                 for command in health.drain_commands():
                     if command.get("command") == "sync_session":
                         started = now
+                        player = ScriptedPlayer(session_id=uuid4().hex)
+                        logger.info("simulated vision session synchronized")
                 elapsed = ((now - started) * max(0.1, time_scale)) % 90.0
                 snapshot = player.sample(elapsed)
                 snapshot.camera_fps = float(network["snapshot_hz"])
                 snapshot.pose_fps = float(network["snapshot_hz"])
                 snapshot.hand_fps = float(network["snapshot_hz"])
                 sender.sendto(encode_snapshot(snapshot), (host, port))
-                health.packets_sent += 1
+                health.mark_packet()
+                health.inference_frames += 1
                 health.inference_fps = float(network["snapshot_hz"])
                 health.camera_fps = float(network["snapshot_hz"])
+                health.camera_connected = True
+                health.frames_captured += 1
+                health.mode = "simulated"
+                health.ready = True
                 next_packet = max(next_packet + interval, now)
     finally:
         server.stop()
     return 0
 
 
-def _hand_actions(result, classifiers: dict[str, WebGestureClassifier]) -> dict[str, WebActions]:
+def _hand_actions(
+    result, classifiers: dict[str, WebGestureClassifier], timestamp: float
+) -> dict[str, WebActions]:
     actions: dict[str, WebActions] = {}
     for index, landmarks in enumerate(result.hand_landmarks):
         label = "Right"
         if index < len(result.handedness) and result.handedness[index]:
             label = result.handedness[index][0].category_name
         classifier = classifiers.setdefault(label, WebGestureClassifier())
-        actions[label] = classifier.classify(landmarks)
+        actions[label] = classifier.classify(landmarks, timestamp)
+    for label, classifier in classifiers.items():
+        if label not in actions:
+            classifier.mark_missing()
     return actions
+
+
+def _reset_hand_classifiers(classifiers: dict[str, WebGestureClassifier]) -> None:
+    for classifier in classifiers.values():
+        classifier.reset()
+
+
+def calibration_profile_when_ready(
+    samples: list[PoseFeatures], elapsed: float, duration: float, minimum_samples: int
+) -> CalibrationProfile | None:
+    if elapsed < duration:
+        return None
+    fallback_minimum = min(8, minimum_samples)
+    safe_samples = samples if len(samples) >= fallback_minimum else []
+    return calibration_from_samples(safe_samples)
 
 
 def _snapshot(
@@ -106,9 +142,14 @@ def _snapshot(
         tracked=pose is not None,
         pose_confidence=pose.confidence if pose else 0.0,
         hand_confidence=1.0 if aims else 0.0,
+        hand_count=len(aims),
         move=body.move,
         aim_x=aim_x,
         aim_y=aim_y,
+        aim_left_x=left.aim_x if left else 0.5,
+        aim_left_y=left.aim_y if left else 0.5,
+        aim_right_x=right.aim_x if right else 0.5,
+        aim_right_y=right.aim_y if right else 0.5,
         jump=body.jump,
         crouch=body.crouch,
         dodge_left=body.dodge_left,
@@ -116,6 +157,14 @@ def _snapshot(
         shield=body.shield,
         web_left=bool(left and left.held),
         web_right=bool(right and right.held),
+        web_left_trigger=bool(left and left.trigger),
+        web_right_trigger=bool(right and right.trigger),
+        fist_left=bool(left and left.fist),
+        fist_right=bool(right and right.fist),
+        palm_open_left=bool(left and left.open_palm),
+        palm_open_right=bool(right and right.open_palm),
+        gesture_left=left.gesture if left else "OPEN",
+        gesture_right=right.gesture if right else "OPEN",
         pull=max(pulls, default=0.0),
         two_hand_pull=min(left.pull, right.pull) if left and right else 0.0,
     )
@@ -124,6 +173,12 @@ def _snapshot(
 def run_live(
     config: ProjectConfig, args: argparse.Namespace, stop: threading.Event, logger: logging.Logger
 ) -> int:
+    import cv2
+
+    from vision.camera_service import CameraService
+    from vision.hand_service import HandService
+    from vision.pose_service import PoseService
+
     game = config.section("game")
     vision_config = config.section("vision")
     models = config.section("models")
@@ -140,7 +195,11 @@ def run_live(
     )
     pose_service = PoseService(root / str(models["pose"]), float(vision_config["pose_confidence"]))
     hand_service = HandService(root / str(models["hands"]), float(vision_config["hand_confidence"]))
-    health = HealthState(ready=True, mode="live")
+    health = HealthState(
+        mode="starting",
+        selected_camera=camera_id,
+        instance_id=args.instance_id or uuid4().hex,
+    )
     health_server = UdpHealthServer(str(game["udp_host"]), int(game["health_port"]), health)
     health_server.start()
     camera.start()
@@ -150,30 +209,81 @@ def run_live(
     session_id = uuid4().hex
     sequence = 0
     last_frame_sequence = 0
-    started = monotonic()
-    inference_started = started
+    service_started = monotonic()
+    calibration_started = service_started
+    inference_started = service_started
     inference_frames = 0
-    logger.info("live vision ready; camera %s", camera_id)
+    logger.info("live vision starting; waiting for camera %s", camera_id)
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+        with (
+            socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender,
+            ThreadPoolExecutor(max_workers=2, thread_name_prefix="landmarks") as inference_pool,
+        ):
             target = (str(game["udp_host"]), int(game["udp_port"]))
             while not stop.is_set():
                 for command in health.drain_commands():
                     name = str(command.get("command", ""))
-                    if name == "restart_camera":
+                    if name == "sync_session":
+                        samples.clear()
+                        movement = None
+                        _reset_hand_classifiers(hands)
+                        session_id = uuid4().hex
+                        sequence = 0
+                        calibration_started = monotonic()
+                        health.calibrated = False
+                        health.calibration_samples = 0
+                        logger.info("vision session synchronized; calibration restarted")
+                    elif name == "restart_camera":
                         camera.request_restart()
+                        samples.clear()
+                        movement = None
+                        _reset_hand_classifiers(hands)
+                        calibration_started = -1.0
+                        health.calibrated = False
+                        health.calibration_samples = 0
                     elif name == "set_camera":
                         camera.request_restart(camera_id=int(command.get("camera_id", 0)))
+                        samples.clear()
+                        movement = None
+                        _reset_hand_classifiers(hands)
+                        calibration_started = -1.0
+                        health.calibrated = False
+                        health.calibration_samples = 0
                     elif name == "set_mirror":
                         camera.request_restart(mirror=bool(command.get("enabled", True)))
+                        samples.clear()
+                        movement = None
+                        _reset_hand_classifiers(hands)
+                        calibration_started = -1.0
+                        health.calibrated = False
+                        health.calibration_samples = 0
                 frame = camera.frames.wait_newer(last_frame_sequence, timeout=0.1)
+                health.camera_connected = camera.metrics.connected
+                health.selected_camera = camera.metrics.selected_camera
                 health.camera_fps = camera.metrics.fps
-                health.mode = "live" if camera.metrics.connected else "reconnecting"
+                health.frames_captured = camera.metrics.frames
+                health.reconnects = camera.metrics.reconnects
+                health.last_error = camera.metrics.last_error
+                if camera.metrics.worker_error:
+                    raise RuntimeError(f"camera worker failed: {camera.metrics.worker_error}")
+                if not camera.metrics.connected:
+                    health.ready = False
+                    health.mode = "reconnecting" if camera.metrics.reconnects else "starting"
                 if frame is None:
+                    if (
+                        health.last_packet_at is not None
+                        and monotonic() - health.last_packet_at > 3.0
+                        and camera.metrics.connected
+                    ):
+                        health.ready = False
+                        health.mode = "stalled"
+                        raise RuntimeError("camera frames stalled for more than three seconds")
                     continue
                 last_frame_sequence = frame.sequence
                 now = monotonic()
-                timestamp_ms = max(1, int((now - started) * 1000.0))
+                if calibration_started < 0.0:
+                    calibration_started = now
+                timestamp_ms = max(1, int((now - service_started) * 1000.0))
                 inference_frame = cv2.resize(
                     frame.value,
                     (
@@ -182,8 +292,11 @@ def run_live(
                     ),
                     interpolation=cv2.INTER_AREA,
                 )
-                pose_result = pose_service.detect(inference_frame, timestamp_ms)
+                pose_future = inference_pool.submit(
+                    pose_service.detect, inference_frame, timestamp_ms
+                )
                 hand_result = hand_service.detect(inference_frame, timestamp_ms)
+                pose_result = pose_future.result()
                 pose = (
                     extract_pose(pose_result.pose_landmarks[0])
                     if pose_result.pose_landmarks
@@ -191,25 +304,41 @@ def run_live(
                 )
                 if pose and movement is None:
                     samples.append(pose)
-                    enough_time = now - started >= float(calibration["duration_seconds"])
-                    if len(samples) >= int(calibration["minimum_samples"]) or enough_time:
+                    health.calibration_samples = len(samples)
+                    profile = calibration_profile_when_ready(
+                        samples,
+                        now - calibration_started,
+                        float(calibration["duration_seconds"]),
+                        int(calibration["minimum_samples"]),
+                    )
+                    if profile is not None:
                         movement = MovementClassifier(
-                            calibration_from_samples(samples),
+                            profile,
                             float(calibration["lean_threshold"]),
                             float(calibration["jump_threshold"]),
                             float(calibration["crouch_threshold"]),
                             float(calibration["dodge_velocity_threshold"]),
                         )
+                        health.calibrated = True
                 body = movement.classify(pose, now) if movement and pose else BodyActions()
-                hand_actions = _hand_actions(hand_result, hands)
+                hand_actions = _hand_actions(hand_result, hands, now)
                 sequence += 1
                 snapshot = _snapshot(sequence, session_id, pose, body, hand_actions)
                 snapshot.camera_fps = camera.metrics.fps
                 snapshot.pose_fps = health.inference_fps
                 snapshot.hand_fps = health.inference_fps
                 sender.sendto(encode_snapshot(snapshot), target)
-                health.packets_sent += 1
+                health.mark_packet()
                 inference_frames += 1
+                health.inference_frames += 1
+                health.ready = bool(camera.metrics.connected and camera.metrics.frames > 0)
+                health.mode = "live" if health.ready else "reconnecting"
+                if health.ready and health.packets_sent == 1:
+                    logger.info(
+                        "live vision ready; camera %s via %s; first frame and UDP packet sent",
+                        camera.metrics.selected_camera,
+                        camera.metrics.backend,
+                    )
                 elapsed = now - inference_started
                 if elapsed >= 1.0:
                     health.inference_fps = inference_frames / elapsed
@@ -232,12 +361,12 @@ def main(argv: list[str] | None = None) -> int:
     stop = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    if args.simulate:
-        return run_simulator(config, stop, logger, args.time_scale)
     try:
+        if args.simulate:
+            return run_simulator(config, stop, logger, args.time_scale, args.instance_id)
         return run_live(config, args, stop, logger)
-    except Exception:
-        logger.exception("live vision failed")
+    except Exception as error:
+        logger.error("vision service failed: %s", error)
         return 20
 
 

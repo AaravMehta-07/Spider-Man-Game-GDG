@@ -8,15 +8,21 @@ main.py supervises two children:
 2. Build/WebProtocol.exe: Godot gameplay, rendering, audio, saves and operator UI.
 
 Processes communicate over bounded localhost UDP. The supervisor probes a separate
-UDP health port before launching the game and restarts vision at most once.
+UDP health port before launching the game. Readiness requires a connected camera,
+captured frame, completed inference, and sent input packet. The supervisor restarts
+vision at most once.
 
 ## Vision data flow
 
-OpenCV automatic Windows backend at requested 30 FPS -> LatestFrameBuffer -> 640x360 PoseLandmarker and HandLandmarker ->
+OpenCV Windows backend at requested 30 FPS -> LatestFrameBuffer -> parallel PoseLandmarker and HandLandmarker inference ->
 filters and pure classifiers -> sequenced InputSnapshot -> UDP 127.0.0.1:42420.
+Snapshots include independent bounded left/right hand coordinates and explicit
+open-palm flags; gameplay aim remains the exact average of both visible hands.
 
-There is no frame queue to accumulate latency. Camera reconnect and runtime camera selection run on the capture thread. Operator commands use a separate bounded UDP queue. Godot rejects duplicate sequence numbers and treats packets older than
-350 ms as stale. Simulated vision uses the same protocol.
+There is no frame queue to accumulate latency. Camera reconnect and runtime camera
+selection run on the capture thread. Operator commands use a separate bounded UDP
+queue. Godot rejects duplicate sequence numbers within each process session and
+treats packets older than 600 ms as stale. Simulated vision uses the same protocol.
 
 ## Godot composition
 
@@ -24,7 +30,7 @@ There is no frame queue to accumulate latency. Camera reconnect and runtime came
 - UdpVisionReceiver: latest normalized vision input
 - ChaseDirector: authored, non-overlapping challenges and chase metrics
 - BossController: readable attacks, counters, sling and assisted finisher
-- CityBuilder: procedural corridor, rain, set pieces and The Veil
+- CityBuilder: procedural corridor, rain, vehicles, set pieces, Glider Raiders and the Void Regent
 - GameHud: attract, HUD, warnings, results, diagnostics and operator surfaces
 - AudioManager: original state music and effects
 - SaveManager: bounded, sorted, atomic local leaderboard

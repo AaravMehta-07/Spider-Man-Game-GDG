@@ -17,12 +17,17 @@ class InputSnapshot:
     tracked: bool = False
     pose_confidence: float = 0.0
     hand_confidence: float = 0.0
+    hand_count: int = 0
     camera_fps: float = 0.0
     pose_fps: float = 0.0
     hand_fps: float = 0.0
     move: float = 0.0
     aim_x: float = 0.5
     aim_y: float = 0.5
+    aim_left_x: float = 0.5
+    aim_left_y: float = 0.5
+    aim_right_x: float = 0.5
+    aim_right_y: float = 0.5
     jump: bool = False
     crouch: bool = False
     dodge_left: bool = False
@@ -30,6 +35,14 @@ class InputSnapshot:
     shield: bool = False
     web_left: bool = False
     web_right: bool = False
+    web_left_trigger: bool = False
+    web_right_trigger: bool = False
+    fist_left: bool = False
+    fist_right: bool = False
+    palm_open_left: bool = False
+    palm_open_right: bool = False
+    gesture_left: str = "OPEN"
+    gesture_right: str = "OPEN"
     pull: float = 0.0
     two_hand_pull: float = 0.0
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -38,10 +51,20 @@ class InputSnapshot:
         self.move = max(-1.0, min(1.0, float(self.move)))
         self.aim_x = max(0.0, min(1.0, float(self.aim_x)))
         self.aim_y = max(0.0, min(1.0, float(self.aim_y)))
+        self.aim_left_x = max(0.0, min(1.0, float(self.aim_left_x)))
+        self.aim_left_y = max(0.0, min(1.0, float(self.aim_left_y)))
+        self.aim_right_x = max(0.0, min(1.0, float(self.aim_right_x)))
+        self.aim_right_y = max(0.0, min(1.0, float(self.aim_right_y)))
         self.pull = max(0.0, min(1.0, float(self.pull)))
         self.two_hand_pull = max(0.0, min(1.0, float(self.two_hand_pull)))
         self.pose_confidence = max(0.0, min(1.0, float(self.pose_confidence)))
         self.hand_confidence = max(0.0, min(1.0, float(self.hand_confidence)))
+        self.hand_count = max(0, min(2, int(self.hand_count)))
+        allowed_gestures = {"OPEN", "SPIDER_POSE", "PINCH", "FIST_SHOT", "PULL", "WEB_HELD"}
+        self.gesture_left = self.gesture_left if self.gesture_left in allowed_gestures else "OPEN"
+        self.gesture_right = (
+            self.gesture_right if self.gesture_right in allowed_gestures else "OPEN"
+        )
         return self
 
 

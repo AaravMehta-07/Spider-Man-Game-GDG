@@ -8,7 +8,7 @@ signal set_piece(kind: StringName)
 
 const CHALLENGES := [
     {"time": 10.5, "duration": 2.0, "kind": &"billboard", "action": &"dodge_left", "prompt": "BILLBOARD RIGHT  |  DODGE LEFT", "points": 900},
-    {"time": 13.0, "duration": 2.2, "kind": &"drone", "action": &"web", "prompt": "DRONE LOCK  |  FIRE WEB", "points": 750},
+    {"time": 13.0, "duration": 2.2, "kind": &"drone", "action": &"web", "prompt": "GLIDER RAIDER  |  FIRE WEB", "points": 750},
     {"time": 16.0, "duration": 2.2, "kind": &"vent", "action": &"jump", "prompt": "ROOFTOP VENT  |  JUMP", "points": 850},
     {"time": 20.0, "duration": 2.5, "kind": &"barrier", "action": &"pull", "prompt": "WEB THE BARRIER  |  PULL", "points": 1200},
     {"time": 24.0, "duration": 2.4, "kind": &"scaffold", "action": &"crouch", "prompt": "LOW SCAFFOLD  |  CROUCH", "points": 900},
@@ -65,7 +65,7 @@ func update(elapsed: float, actions: Dictionary) -> void:
             perfect_dodges += 1
         if active["kind"] == &"rescue":
             rescues += 1
-        if str(active["action"]) == "web":
+        if str(active["action"]) in ["web", "pull", "double_web"]:
             web_hits += 1
         challenge_cleared.emit(int(active["points"]), label)
         index += 1

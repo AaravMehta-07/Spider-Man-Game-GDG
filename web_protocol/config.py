@@ -54,12 +54,38 @@ class ProjectConfig:
         game = self.section("game")
         vision = self.section("vision")
         network = self.section("network")
-        self._number(game, "session_seconds", 60.0, 90.0)
+        calibration = self.section("calibration")
+        gestures = self.section("gestures")
+        models = self.section("models")
+        self._number(game, "session_seconds", 90.0, 90.0)
         self._number(vision, "camera_id", 0, 16)
         self._number(vision, "target_fps", 10, 60)
+        self._number(vision, "capture_width", 320, 3840)
+        self._number(vision, "capture_height", 180, 2160)
+        self._number(vision, "inference_width", 160, 1920)
+        self._number(vision, "inference_height", 90, 1080)
+        self._number(vision, "pose_confidence", 0.1, 1.0)
+        self._number(vision, "hand_confidence", 0.1, 1.0)
+        self._number(vision, "stale_after_ms", 100, 2000)
         self._number(network, "snapshot_hz", 10, 60)
+        self._number(network, "queue_size", 1, 8)
+        self._number(calibration, "duration_seconds", 1.0, 10.0)
+        self._number(calibration, "minimum_samples", 4, 300)
+        self._number(calibration, "lean_threshold", 0.01, 0.5)
+        self._number(calibration, "jump_threshold", 0.01, 0.5)
+        self._number(calibration, "crouch_threshold", 0.01, 0.5)
+        self._number(calibration, "dodge_velocity_threshold", 0.1, 5.0)
+        self._number(gestures, "pull_threshold", 0.01, 1.0)
         for port_key, section in (("udp_port", game), ("health_port", game)):
             self._number(section, port_key, 1024, 65535)
+        if game.get("udp_host") != "127.0.0.1":
+            raise ConfigurationError("udp_host must be 127.0.0.1 for offline localhost operation")
+        if int(game["udp_port"]) == int(game["health_port"]):
+            raise ConfigurationError("udp_port and health_port must be different")
+        for model_key in ("pose", "hands"):
+            value = models.get(model_key)
+            if not isinstance(value, str) or not value.strip():
+                raise ConfigurationError(f"models.{model_key} must be a non-empty path")
 
     def section(self, name: str) -> dict[str, Any]:
         section = self.values.get(name)

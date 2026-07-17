@@ -16,6 +16,11 @@ Use transparent PNG for logos and emblem. Use a square, high-contrast QR code wi
 quiet margin. Test QR scanning from the actual display distance. Do not put personal
 data in the QR image.
 
+After replacing `recruitment_qr.png` with the tested event QR, create an empty marker
+file named `game/assets/branding/recruitment_qr.ready` before the release build. The
+results screen will only show the scan call-to-action when that marker is packaged.
+Without it, the game clearly labels the image as not configured.
+
 ## Attract city
 
 game/assets/generated/attract_city.png is a 16:9 original background plate. A
