@@ -1,4 +1,4 @@
-# WEB//PROTOCOL: Spider-Sense
+# Spider-Man Game GDG
 
 An original 90-second motion-controlled superhero arcade game for Windows. Godot
 renders the game while a local Python and MediaPipe vision service turns webcam
@@ -17,8 +17,8 @@ by Marvel, Sony, or Insomniac Games.
 ## Setup
 
 ```powershell
-git clone https://github.com/AaravMehta-07/web-protocol-spider-sense.git
-cd web-protocol-spider-sense
+git clone https://github.com/AaravMehta-07/Spider-Man-Game-GDG.git
+cd Spider-Man-Game-GDG
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
