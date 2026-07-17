@@ -110,7 +110,7 @@ func _update_finisher(elapsed: float, delta: float, actions: Dictionary) -> void
         health = 0.0
         final_contained = true
         boss_health_changed.emit(health)
-        finisher_prompt.emit("THE VOID REGENT CONTAINED")
+        finisher_prompt.emit("GREEN GOBLIN CONTAINED")
         contained.emit()
 
 

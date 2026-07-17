@@ -1,0 +1,73 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/boss/green_goblin_visual.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://assets/models/green_goblin_2002.glb" id="2_model"]
+
+[sub_resource type="StandardMaterial3D" id="Material_hit"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.55, 1, 0.35, 0.92)
+emission_enabled = true
+emission = Color(0.35, 1, 0.2, 1)
+emission_energy_multiplier = 5.0
+
+[sub_resource type="SphereMesh" id="Sphere_hit"]
+material = SubResource("Material_hit")
+radius = 0.09
+height = 0.18
+
+[sub_resource type="ParticleProcessMaterial" id="Particles_hit"]
+emission_shape = 1
+emission_sphere_radius = 0.65
+direction = Vector3(0, 0.1, 1)
+spread = 75.0
+initial_velocity_min = 5.0
+initial_velocity_max = 9.0
+gravity = Vector3(0, -3.5, 0)
+scale_min = 0.5
+scale_max = 1.6
+
+[sub_resource type="SphereMesh" id="Sphere_thruster"]
+material = SubResource("Material_hit")
+radius = 0.13
+height = 0.26
+
+[node name="GreenGoblinBoss" type="Node3D"]
+script = ExtResource("1_script")
+
+[node name="MotionPivot" type="Node3D" parent="."]
+
+[node name="ModelPivot" type="Node3D" parent="MotionPivot"]
+scale = Vector3(3.25, 3.25, 3.25)
+
+[node name="GreenGoblinModel" parent="MotionPivot/ModelPivot" instance=ExtResource("2_model")]
+
+[node name="LeftThrusterMesh" type="MeshInstance3D" parent="MotionPivot"]
+position = Vector3(-2.25, -0.68, -1.1)
+mesh = SubResource("Sphere_thruster")
+
+[node name="RightThrusterMesh" type="MeshInstance3D" parent="MotionPivot"]
+position = Vector3(2.25, -0.68, -1.1)
+mesh = SubResource("Sphere_thruster")
+
+[node name="LeftThruster" type="OmniLight3D" parent="MotionPivot"]
+position = Vector3(-2.25, -0.7, -1.2)
+light_color = Color(0.34, 1, 0.18, 1)
+light_energy = 4.2
+omni_range = 4.5
+
+[node name="RightThruster" type="OmniLight3D" parent="MotionPivot"]
+position = Vector3(2.25, -0.7, -1.2)
+light_color = Color(0.34, 1, 0.18, 1)
+light_energy = 4.2
+omni_range = 4.5
+
+[node name="HitBurst" type="GPUParticles3D" parent="MotionPivot"]
+position = Vector3(0, 2.8, 1.2)
+emitting = false
+amount = 28
+lifetime = 0.45
+one_shot = true
+explosiveness = 1.0
+process_material = SubResource("Particles_hit")
+draw_pass_1 = SubResource("Sphere_hit")

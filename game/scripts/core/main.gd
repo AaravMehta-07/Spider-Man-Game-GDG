@@ -517,6 +517,7 @@ func _on_boss_counter(points: int, label: String) -> void:
     score += ChaseDirector.score_with_combo(points, combo)
     combo = mini(8, combo + 1)
     _show_impact(label)
+    city.show_boss_hit(true)
     audio.play_effect("impact")
     _clear_context_prompt()
 
@@ -554,7 +555,7 @@ func _apply_damage(damage: float) -> void:
 func _on_boss_web_hit(label: String) -> void:
     score += 180
     _show_impact(label)
-    city.play_set_piece(&"counter")
+    city.show_boss_hit(false)
     audio.play_effect("web_attach")
 
 
@@ -575,7 +576,7 @@ func _on_finisher_prompt(value: String) -> void:
 
 func _on_boss_contained() -> void:
     score += 5000
-    _show_impact("THE VOID REGENT CONTAINED")
+    _show_impact("GREEN GOBLIN CONTAINED")
 
 
 func _show_impact(label: String) -> void:
@@ -596,9 +597,9 @@ func _on_state_changed(_previous: StringName, current: StringName) -> void:
     hud.instruction_hint = _state_instruction(current)
     hud.danger_direction = &"center"
     if current == SessionController.CHASE:
-        hud.prompt = "GLIDER RAIDERS INBOUND  |  STOP THE VOID REGENT"
+        hud.prompt = "GLIDER RAIDERS INBOUND  |  STOP GREEN GOBLIN"
     elif current == SessionController.BOSS_INTRO:
-        hud.prompt = "COSMIC THREAT LOCKED  |  THE VOID REGENT"
+        hud.prompt = "HOSTILE LOCKED  |  GREEN GOBLIN"
         city.play_set_piece(&"boss_reveal")
     elif current == SessionController.FINISHER:
         hud.prompt = "BOTH HANDS FORWARD  |  FIRE BOTH WEBS"

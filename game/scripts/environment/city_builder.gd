@@ -11,8 +11,7 @@ var _props: Array[Node3D] = []
 var _set_pieces: Array[Node3D] = []
 var _rain: Array[MeshInstance3D] = []
 var _cage: Array[MeshInstance3D] = []
-var _boss: Node3D
-var _boss_material: ShaderMaterial
+var _boss: GreenGoblinVisual
 var _boss_shadow: MeshInstance3D
 var _gpu_rain: GPUParticles3D
 var _traffic_follow: PathFollow3D
@@ -79,6 +78,11 @@ func play_set_piece(kind: StringName) -> void:
     _spawn_piece(kind)
 
 
+func show_boss_hit(heavy := false) -> void:
+    if is_instance_valid(_boss):
+        _boss.show_hit(heavy)
+
+
 func _move_looped(items: Array[Node3D], travel: float, span: float) -> void:
     for item in items:
         item.position.z += travel
@@ -134,10 +138,7 @@ func _update_boss(delta: float) -> void:
     _boss.rotation = Vector3(0, sin(time * 0.9) * 0.2, sin(time * 1.4) * 0.05) + _boss_reaction_rotation * reaction_weight
     _boss.scale = Vector3.ONE * (1.0 - boss_tension * 0.22)
     _boss_shadow.position = Vector3(_boss.position.x * 0.7, 0.02, _boss.position.z + 1.7)
-    var damage := 1.0 - boss_health / 100.0
-    _boss_material.set_shader_parameter("damage", damage)
-    _boss_material.set_shader_parameter("tension", boss_tension)
-    _boss_material.set_shader_parameter("pulse", 2.2 + sin(time * 6.0) * 0.45 + damage * 3.0)
+    _boss.update_visual(delta, boss_health, boss_tension, mission_state)
     for index in _cage.size():
         var angle := float(index) / float(_cage.size()) * TAU
         var radius := 5.2 - boss_tension * 2.8
@@ -333,51 +334,10 @@ func _build_rain() -> void:
 
 
 func _build_boss() -> void:
-    _boss = Node3D.new()
-    _boss.name = "VoidRegent"
+    var boss_scene: PackedScene = preload("res://scenes/green_goblin_boss.tscn")
+    _boss = boss_scene.instantiate() as GreenGoblinVisual
+    _boss.name = "GreenGoblin"
     add_child(_boss)
-    _boss_material = ShaderMaterial.new()
-    _boss_material.shader = load("res://shaders/boss_distortion.gdshader")
-    _boss_material.set_shader_parameter("veil_color", Color(0.018, 0.08, 0.095, 0.9))
-    _boss_material.set_shader_parameter("crack_color", Color(1.0, 0.03, 0.25, 1.0))
-    var torso := _sphere(1.35, Color.WHITE, Vector3(0, 0.7, 0), _boss, 28, 18, _boss_material)
-    torso.scale = Vector3(1.18, 1.55, 0.72)
-    var head := _sphere(0.72, Color.WHITE, Vector3(0, 2.6, 0), _boss, 24, 16, _boss_material)
-    head.scale = Vector3(0.86, 1.12, 0.78)
-    _box(Vector3(2.45, 1.05, 0.48), Color(0.07, 0.32, 0.38), Vector3(0, 1.35, 0.72), _boss, 0.82, 0.18)
-    _box(Vector3(1.75, 1.45, 0.38), Color(0.11, 0.14, 0.18), Vector3(0, 0.1, 0.82), _boss, 0.78, 0.22)
-    _box(Vector3(2.7, 0.38, 0.48), Color(0.62, 0.08, 0.16), Vector3(0, -0.65, 0.68), _boss, 0.68, 0.2)
-    for crown_side in [-1, 1]:
-        var crown := _cylinder(0.12, 1.15, Color(0.1, 0.52, 0.58), Vector3(float(crown_side) * 0.5, 3.45, -0.05), _boss, 8)
-        crown.rotation.z = -float(crown_side) * 0.35
-    for side in [-1, 1]:
-        var shoulder := _sphere(0.58, Color.WHITE, Vector3(float(side) * 1.12, 1.35, 0), _boss, 18, 12, _boss_material)
-        shoulder.scale = Vector3(1.15, 0.9, 0.9)
-        var pauldron := _sphere(0.72, Color(0.08, 0.38, 0.44), Vector3(float(side) * 1.35, 1.48, 0.15), _boss, 16, 10)
-        pauldron.scale = Vector3(1.2, 0.58, 1.05)
-        var upper_arm := _cylinder(0.42, 2.15, Color.WHITE, Vector3(float(side) * 1.58, 0.32, 0), _boss, 16, _boss_material)
-        upper_arm.rotation.z = float(side) * 0.42
-        var forearm := _cylinder(0.32, 2.25, Color.WHITE, Vector3(float(side) * 2.18, -1.45, -0.05), _boss, 16, _boss_material)
-        forearm.rotation.z = float(side) * 0.2
-        var gauntlet := _cylinder(0.46, 1.0, Color(0.09, 0.34, 0.38), Vector3(float(side) * 2.32, -2.0, 0.15), _boss, 12)
-        gauntlet.rotation.z = float(side) * 0.2
-        _make_claw(_boss, Vector3(float(side) * 2.42, -2.65, -0.1), side)
-        var thigh := _cylinder(0.48, 2.45, Color.WHITE, Vector3(float(side) * 0.58, -1.35, 0), _boss, 18, _boss_material)
-        thigh.rotation.z = -float(side) * 0.08
-        var shin := _cylinder(0.35, 2.5, Color.WHITE, Vector3(float(side) * 0.7, -3.65, 0.08), _boss, 16, _boss_material)
-        shin.rotation.z = float(side) * 0.04
-        _box(Vector3(0.92, 1.7, 0.72), Color(0.075, 0.27, 0.32), Vector3(float(side) * 0.7, -3.45, 0.45), _boss, 0.76, 0.22)
-        var eye := _sphere(0.2, Color(1.0, 0.05, 0.12), Vector3(float(side) * 0.26, 2.72, 0.58), _boss, 12, 8)
-        eye.scale = Vector3(0.6, 1.65, 0.28)
-        _set_emission(eye, Color(1.0, 0.01, 0.08), 7.0)
-    var chest := _sphere(0.36, Color(1.0, 0.04, 0.1), Vector3(0, 0.95, 1.0), _boss, 16, 10)
-    chest.scale = Vector3(1.0, 1.5, 0.3)
-    _set_emission(chest, Color(1.0, 0.01, 0.08), 5.0)
-    var faceplate := _box(Vector3(0.82, 0.62, 0.22), Color(0.08, 0.4, 0.46), Vector3(0, 2.45, 0.64), _boss, 0.8, 0.16)
-    faceplate.rotation.x = -0.08
-    for strand_index in range(6):
-        var strand := _cylinder(0.055, 3.5 + strand_index * 0.28, Color.WHITE, Vector3(0, 0.4, -0.45), _boss, 8, _boss_material)
-        strand.rotation = Vector3(0.4 + strand_index * 0.19, strand_index * TAU / 6.0, 0.3)
     _boss.visible = false
     _boss_shadow = _box(Vector3(5.8, 0.04, 8.4), Color(0.0, 0.0, 0.0, 0.72), Vector3(0, 0.02, -22), self, 0.0, 1.0)
     _boss_shadow.visible = false
@@ -386,15 +346,6 @@ func _build_boss() -> void:
         _set_emission(cage_strand, Color(0.36, 0.82, 1.0), 4.0)
         cage_strand.visible = false
         _cage.append(cage_strand)
-
-
-func _make_claw(parent: Node3D, position_: Vector3, side: int) -> void:
-    var palm := _sphere(0.38, Color.WHITE, position_, parent, 14, 8, _boss_material)
-    palm.scale = Vector3(0.8, 1.25, 0.65)
-    for finger in range(3):
-        var claw := _cylinder(0.065, 0.85 + finger * 0.09, Color.WHITE, position_ + Vector3(float(side) * (0.18 + finger * 0.1), -0.46, (finger - 1) * 0.16), parent, 8, _boss_material)
-        claw.rotation.z = float(side) * 0.18
-
 
 func _spawn_piece(kind: StringName) -> void:
     var piece := Node3D.new()
@@ -637,7 +588,7 @@ func _make_debris(parent: Node3D) -> void:
 func _pulse_boss(kind: StringName) -> void:
     if not is_instance_valid(_boss):
         return
-    _boss_material.set_shader_parameter("pulse", 7.0)
+    _boss.play_action(kind)
     _boss_reaction_time = 0.35
     _boss_reaction_offset = Vector3.ZERO
     _boss_reaction_rotation = Vector3.ZERO
