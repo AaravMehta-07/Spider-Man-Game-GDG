@@ -23,6 +23,9 @@ $TestLog = Join-Path $Logs "godot_tests.log"
 $ExportLog = Join-Path $Logs "godot_export.log"
 $PythonLintLog = Join-Path $Logs "python_lint.log"
 $PythonTestLog = Join-Path $Logs "python_tests.log"
+$GodotImportRuntimeLog = Join-Path $Logs "godot_import_runtime.log"
+$GodotTestRuntimeLog = Join-Path $Logs "godot_test_runtime.log"
+$GodotExportRuntimeLog = Join-Path $Logs "godot_export_runtime.log"
 Remove-Item -LiteralPath $ImportLog, $TestLog, $ExportLog -Force -ErrorAction SilentlyContinue
 ("Godot: " + $Godot + [Environment]::NewLine + "Version: " + $Locator.version) | Set-Content -LiteralPath $BuildLog
 $PythonPrefix = @()
@@ -41,19 +44,19 @@ function Assert-GodotLog {
 if ($LASTEXITCODE -ne 0) { throw "Python lint failed with exit code $LASTEXITCODE." }
 & $Python @PythonPrefix -m pytest 2>&1 | Tee-Object -FilePath $PythonTestLog
 if ($LASTEXITCODE -ne 0) { throw "Python tests failed with exit code $LASTEXITCODE." }
-& $Godot --headless --path $Project --editor --quit 2>&1 |
+& $Godot --headless --path $Project --log-file $GodotImportRuntimeLog --editor --quit 2>&1 |
     Tee-Object -FilePath $ImportLog |
     Tee-Object -FilePath $BuildLog -Append
 if ($LASTEXITCODE -ne 0) { throw "Godot import failed with exit code $LASTEXITCODE." }
 Assert-GodotLog -Path $ImportLog
-& $Godot --headless --path $Project -s res://tests/test_runner.gd 2>&1 |
+& $Godot --headless --path $Project --log-file $GodotTestRuntimeLog -s res://tests/test_runner.gd 2>&1 |
     Tee-Object -FilePath $TestLog |
     Tee-Object -FilePath $BuildLog -Append
 if ($LASTEXITCODE -ne 0) { throw "GDScript tests failed with exit code $LASTEXITCODE." }
 Assert-GodotLog -Path $TestLog -SuccessMarker "GDScript tests passed"
 $Mode = if ($DebugExport) { "--export-debug" } else { "--export-release" }
 $Exe = Join-Path $Build "WebProtocol.exe"
-& $Godot --headless --path $Project $Mode "Windows Desktop" $Exe 2>&1 |
+& $Godot --headless --path $Project --log-file $GodotExportRuntimeLog $Mode "Windows Desktop" $Exe 2>&1 |
     Tee-Object -FilePath $ExportLog |
     Tee-Object -FilePath $BuildLog -Append
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Exe)) { throw "Windows export failed. Check $BuildLog." }

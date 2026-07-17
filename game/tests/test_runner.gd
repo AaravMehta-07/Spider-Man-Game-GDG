@@ -15,6 +15,7 @@ func _init() -> void:
     _test_chase_schedule_has_no_overlap()
     _test_city_obstacles_and_scoring()
     _test_every_chase_kind_has_visual_geometry()
+    _test_green_goblin_assets()
     _test_boss_counter()
     _test_boss_free_fire_and_target_lock()
     _test_finisher_always_completes()
@@ -164,6 +165,20 @@ func _test_every_chase_kind_has_visual_geometry() -> void:
         _expect(piece.get_child_count() > 0, "%s chase set piece has visible geometry" % kind)
         city.reset_dynamic_objects()
     city.free()
+
+func _test_green_goblin_assets() -> void:
+    _expect(FileAccess.file_exists("res://assets/models/green_goblin_2002.glb"), "Green Goblin source model is versioned")
+    _expect(FileAccess.file_exists("res://assets/fonts/Oxanium.ttf"), "HUD font is bundled")
+    _expect(FileAccess.file_exists("res://assets/branding/gdg/gdg_logo_horizontal.png"), "home branding is bundled")
+    _expect(FileAccess.file_exists("res://assets/branding/gdg/gdg_logo.png"), "results branding is bundled")
+    var scene: PackedScene = load("res://scenes/green_goblin_boss.tscn")
+    _expect(scene != null, "Green Goblin boss scene loads")
+    if scene != null:
+        var visual := scene.instantiate()
+        _expect(visual is GreenGoblinVisual, "boss scene uses the Green Goblin visual controller")
+        _expect(visual.find_child("GreenGoblinModel", true, false) != null, "boss scene contains the supplied model")
+        _expect(visual.find_child("LeftThruster", true, false) != null and visual.find_child("RightThruster", true, false) != null, "glider has visible thruster effects")
+        visual.free()
 
 func _test_boss_counter() -> void:
     var controller = preload("res://scripts/boss/boss_controller.gd").new()
