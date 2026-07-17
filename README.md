@@ -41,12 +41,7 @@ python main.py --setup-check
 
 ## Camera Controls
 
-- Hold both open palms for 3 seconds to begin.
-- Close either fist and move it to air-write one uppercase name letter.
-- Open the hand to lift the pen.
-- Pinch to accept the predicted letter.
-- Hold both fists to clear or undo.
-- Hold both palms open to confirm the name and start the mission.
+- Hold both open palms for 3 seconds to start the mission.
 - Move or lean left and right to dodge.
 - Raise or lower your body to jump or crouch.
 - Aim with the average position of both hands.
@@ -70,8 +65,8 @@ The game displays the active gesture and keyboard fallback during play.
 ## Privacy
 
 Vision runs locally. Camera frames, hand landmarks, handwriting strokes, and
-biometric templates are not saved or uploaded. Only the accepted display name,
-score, gameplay metrics, and timestamp may be stored in the local leaderboard.
+biometric templates are not saved or uploaded. Only the score, gameplay metrics,
+and timestamp may be stored in the local leaderboard.
 
 ## Test
 

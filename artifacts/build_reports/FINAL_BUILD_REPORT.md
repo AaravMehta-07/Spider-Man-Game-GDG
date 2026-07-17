@@ -36,7 +36,6 @@ release items do not block a supervised internal booth rehearsal.
 10. A run could absorb unlimited obstacle collisions without a clear loss condition.
 11. The attract screen asked for both hands but had no explicit, visible open-palm
     dwell lock and could leave a participant waiting without advancing.
-12. Participant identity was fixed text rather than a camera-driven onboarding step.
 
 ## Repairs
 
@@ -72,13 +71,8 @@ release items do not block a supervised internal booth rehearsal.
 - Roads, buses, facades, street furniture, obstacles, the original Glider Raider,
   and the original armored cosmic boss, the Void Regent, received a visual upgrade.
 - Camera onboarding now requires two explicitly detected open palms held for three
-  seconds. The visible lock decays through brief tracking flicker and advances to
-  name entry automatically; Enter remains a keyboard-only fallback.
-- Name entry is a bounded local air-writing flow: close either fist to draw one
-  uppercase block letter, open the hand to lift the pen, pinch to accept the
-  prediction, hold both fists to clear/undo, and hold both palms open to confirm.
-  Independent left/right aim coordinates prevent the averaged gameplay cursor from
-  corrupting single-hand pen strokes. No frames, landmarks, or strokes are stored.
+  seconds. The visible lock decays through brief tracking flicker and starts the
+  mission immediately; Enter remains a keyboard-only fallback.
 - Simulated vision creates a fresh session identity after mission synchronization,
   preventing reset packets from being discarded as stale across repeated runs.
 
@@ -87,11 +81,11 @@ release items do not block a supervised internal booth rehearsal.
 - Python 3.11.9 setup check: passed.
 - Python tests: 35 passed.
 - Python lint for all changed Python modules: passed.
-- GDScript tests: 125 assertions passed.
+- GDScript tests: 117 assertions passed.
 - Godot 4.7.1 import/parser validation: passed.
 - Windows release export: passed.
-- Release size: 111,539,792 bytes.
-- Release SHA-256: `59988F64E21E30D76728738C56165A01293DAF8AB476266968D47DDDEBDFBCBD`.
+- Release size: 111,525,408 bytes.
+- Release SHA-256: `D60A8314D20519D13805507A2E8137DB1350BE1752D5AEC5A6AA24B73C74BC0C`.
 - Simulated full mission: reached all authored states, results, 90.00-second reset,
   clean exit, and 13 regenerated screenshots.
 - Capture performance at 1280x720: 84.18 average FPS, 60.00 FPS fifth percentile,
@@ -124,8 +118,7 @@ release items do not block a supervised internal booth rehearsal.
 - Exact both-hand average regression: left aim (0.2, 0.3) and right aim (0.8, 0.7)
   produced combined aim (0.5, 0.5).
 - Open-palm onboarding policy requires fresh tracking, exactly two hands, both
-  explicit palm flags, and the complete three-second dwell. Air-name tests cover
-  stroke bounds, A/V recognition, accept, safe keyboard input, clear, and undo.
+  explicit palm flags, and the complete three-second dwell.
 
 ## Evidence Boundaries
 
@@ -134,8 +127,7 @@ release items do not block a supervised internal booth rehearsal.
   front of the laptop for a physical-gesture play-through.
 - Gesture classifiers, simulated gestures, prompts, timing, camera frames, live
   inference packets, and keyboard gameplay are proven separately. A booth acceptance
-  run with a standing participant in final lighting remains an operational check,
-  especially for that participant's handwriting scale and open-palm/fist transitions.
+  run with a standing participant in final lighting remains an operational check.
 - The automated capture sandbox logged a Windows certificate-store warning. The game
   uses no TLS or cloud service, and the normal elevated build/export completed cleanly.
 - A literal multi-hour soak and 100 physical participant sessions were not performed.
@@ -151,8 +143,7 @@ release items do not block a supervised internal booth rehearsal.
 
 - Executable: `C:\Aarav\Code\SpiderMan\Build\WebProtocol.exe`
 - Build metadata: `artifacts/build_reports/latest_build.json`
-- Screenshots: `artifacts/screenshots/01_attract.png`, `01_air_name.png`, and the
-  authored mission states through `13_results.png`
+- Screenshots: `artifacts/screenshots/01_attract.png` through `13_results.png`
 - Failure result: `artifacts/screenshots/13_failure_results.png`
 - Capture timing: `artifacts/test_reports/capture_timing.json`
 - Live camera: `artifacts/test_reports/live_camera_smoke.json`

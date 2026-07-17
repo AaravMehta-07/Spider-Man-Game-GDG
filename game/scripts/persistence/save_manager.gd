@@ -107,8 +107,6 @@ func _valid_entry(candidate: Dictionary) -> bool:
 
 func _normalized_entry(candidate: Dictionary) -> Dictionary:
     return {
-        "nickname": str(candidate.get("nickname", "")).left(32),
-        "codename": str(candidate.get("codename", "Anonymous Hero")).left(48),
         "score": maxi(0, int(candidate.get("score", 0))),
         "web_accuracy": clampi(int(candidate.get("web_accuracy", 0)), 0, 100),
         "spider_sense": clampi(int(candidate.get("spider_sense", 0)), 0, 100),

@@ -60,17 +60,8 @@ var collision_strikes := 0
 var max_collision_strikes := 3
 var mission_failed := false
 var shot_feedback := ""
-var onboarding_mode: StringName = &"READY"
 var ready_hold_seconds := 0.0
 var ready_hold_required := 3.0
-var participant_name := ""
-var air_strokes: Array[PackedVector2Array] = []
-var air_cursor := Vector2(0.5, 0.5)
-var air_pen_down := false
-var air_prediction := ""
-var air_confidence := 0.0
-var name_confirm_hold := 0.0
-var name_confirm_required := 1.5
 var rescue_goal := 1
 var high_score := 0
 var leaderboard: Array = []
@@ -94,10 +85,7 @@ func _process(delta: float) -> void:
 func _draw() -> void:
     var viewport_size := size
     if state == &"ATTRACT":
-        if onboarding_mode == &"NAME_ENTRY":
-            _draw_name_entry(viewport_size)
-        else:
-            _draw_attract(viewport_size)
+        _draw_attract(viewport_size)
     elif state == &"RESULTS":
         _draw_results(viewport_size)
     else:
@@ -155,9 +143,9 @@ func _draw_attract(viewport_size: Vector2) -> void:
     var start_color := Color(0.82, 0.02, 0.12, 0.92) if can_start else Color(0.04, 0.16, 0.28, 0.94)
     _panel(Rect2(108, 535, 560, 88), start_color)
     if keyboard_mode:
-        _text("ENTER IDENTITY  [ENTER]", Vector2(142, 593), 26, Color.WHITE)
+        _text("START MISSION  [ENTER]", Vector2(142, 593), 26, Color.WHITE)
     elif can_start:
-        _text("IDENTITY LOCK ACQUIRED", Vector2(142, 593), 25, Color.WHITE)
+        _text("MISSION LOCK ACQUIRED", Vector2(142, 593), 25, Color.WHITE)
     elif camera_ready and player_tracked:
         _text("OPEN PALMS  %.1f / %.1f SEC" % [ready_hold_seconds, ready_hold_required], Vector2(142, 593), 23, Color.WHITE)
     elif camera_ready:
@@ -190,7 +178,7 @@ func _draw_attract_camera(viewport_size: Vector2) -> void:
         _text("SPACE JUMP  |  S CROUCH  |  F SHIELD", rect.position + Vector2(28, 146), 16, Color(0.72, 0.86, 1.0))
     elif camera_ready and player_tracked and hands_ready:
         _text("PLAYER TRACKED  |  OPEN-PALM LOCK COMPLETE", rect.position + Vector2(28, 116), 16, Color.WHITE)
-        _text("OPENING AIR-WRITING BOARD", rect.position + Vector2(28, 146), 16, Color(0.72, 0.86, 1.0))
+        _text("STARTING MISSION", rect.position + Vector2(28, 146), 16, Color(0.72, 0.86, 1.0))
     elif camera_ready and player_tracked:
         _text("BODY READY  |  HANDS %d/2" % hand_count, rect.position + Vector2(28, 116), 17, Color.WHITE)
         _text("HOLD BOTH OPEN PALMS FOR THREE SECONDS", rect.position + Vector2(28, 146), 15, Color(0.72, 0.86, 1.0))
@@ -213,53 +201,6 @@ func _draw_quick_controls(viewport_size: Vector2) -> void:
     _control_row(rect, 259, "DODGE / MOVE", "LEAN OR STEP LEFT / RIGHT", "A / D")
     _control_row(rect, 316, "JUMP / CROUCH", "JUMP UP / CROUCH LOW", "SPACE / S")
     _control_row(rect, 373, "SHIELD", "RAISE BOTH FOREARMS", "F")
-
-
-func _draw_name_entry(viewport_size: Vector2) -> void:
-    draw_texture_rect(attract_background, Rect2(Vector2.ZERO, viewport_size), false)
-    draw_rect(Rect2(Vector2.ZERO, viewport_size), Color(0.002, 0.008, 0.025, 0.83))
-    _text_center("AIR-WRITE YOUR NAME", Vector2(viewport_size.x * 0.5, 82), 48, Color.WHITE)
-    _text_center("ONE UPPERCASE BLOCK LETTER AT A TIME", Vector2(viewport_size.x * 0.5, 124), 19, Color(0.25, 0.78, 1.0))
-    var board := Rect2(viewport_size.x * 0.5 - 390, 175, 780, 610)
-    _panel(board, Color(0.006, 0.018, 0.05, 0.97))
-    draw_rect(board.grow(-22), Color(0.01, 0.035, 0.075, 0.72), true)
-    for x in range(1, 6):
-        var grid_x := board.position.x + board.size.x * float(x) / 6.0
-        draw_line(Vector2(grid_x, board.position.y + 22), Vector2(grid_x, board.end.y - 22), Color(0.1, 0.35, 0.5, 0.18), 1.0)
-    for y in range(1, 5):
-        var grid_y := board.position.y + board.size.y * float(y) / 5.0
-        draw_line(Vector2(board.position.x + 22, grid_y), Vector2(board.end.x - 22, grid_y), Color(0.1, 0.35, 0.5, 0.18), 1.0)
-    for stroke in air_strokes:
-        for index in range(1, stroke.size()):
-            var from := board.position + stroke[index - 1] * board.size
-            var to := board.position + stroke[index] * board.size
-            draw_line(from, to, Color(0.12, 0.86, 1.0), 10.0, true)
-            draw_circle(to, 5.0, Color(0.72, 0.96, 1.0))
-    var cursor_position := board.position + air_cursor * board.size
-    draw_circle(cursor_position, 17.0, Color(1.0, 0.12, 0.2) if air_pen_down else Color(0.1, 0.78, 1.0), false, 4.0)
-    draw_circle(cursor_position, 4.0, Color.WHITE)
-    _panel(Rect2(85, 175, 430, 610), Color(0.005, 0.016, 0.045, 0.96))
-    _text("YOUR NAME", Vector2(120, 230), 20, Color(0.25, 0.78, 1.0))
-    _text(participant_name if not participant_name.is_empty() else "_", Vector2(120, 305), 43, Color.WHITE)
-    _text("PREDICTED LETTER", Vector2(120, 390), 17, Color(0.72, 0.86, 1.0))
-    _text(air_prediction if not air_prediction.is_empty() else "?", Vector2(120, 510), 112, Color(1.0, 0.18, 0.25))
-    _text("MATCH  %d%%" % int(air_confidence * 100.0), Vector2(120, 570), 18, Color(0.25, 0.78, 1.0))
-    _text("FIST     DRAW", Vector2(120, 645), 18, Color.WHITE)
-    _text("OPEN     LIFT PEN", Vector2(120, 682), 18, Color.WHITE)
-    _text("PINCH    ACCEPT LETTER", Vector2(120, 719), 18, Color.WHITE)
-    _panel(Rect2(viewport_size.x - 515, 175, 430, 610), Color(0.005, 0.016, 0.045, 0.96))
-    _text("FINISH", Vector2(viewport_size.x - 475, 230), 20, Color(0.25, 0.78, 1.0))
-    if keyboard_mode:
-        _text("TYPE YOUR NAME", Vector2(viewport_size.x - 475, 305), 23, Color.WHITE)
-        _text("PRESS ENTER", Vector2(viewport_size.x - 475, 350), 23, Color.WHITE)
-        _text("BACKSPACE TO UNDO", Vector2(viewport_size.x - 475, 430), 17, Color(0.72, 0.86, 1.0))
-    else:
-        _text("BOTH FISTS", Vector2(viewport_size.x - 475, 305), 22, Color.WHITE)
-        _text("HOLD TO CLEAR / UNDO", Vector2(viewport_size.x - 475, 342), 17, Color(0.72, 0.86, 1.0))
-        _text("BOTH PALMS OPEN", Vector2(viewport_size.x - 475, 430), 22, Color.WHITE)
-        _text("HOLD TO START MISSION", Vector2(viewport_size.x - 475, 467), 17, Color(0.72, 0.86, 1.0))
-        _bar(Rect2(viewport_size.x - 475, 500, 350, 12), name_confirm_hold / maxf(0.1, name_confirm_required), Color(0.1, 0.86, 1.0))
-    _text("NO CAMERA IMAGE OR BIOMETRICS ARE SAVED", Vector2(viewport_size.x - 475, 720), 14, Color(0.48, 0.72, 0.84))
 
 
 func _control_row(rect: Rect2, y: float, action: String, camera: String, fallback: String) -> void:
@@ -419,8 +360,7 @@ func _draw_results(viewport_size: Vector2) -> void:
     draw_texture_rect(attract_background, Rect2(Vector2.ZERO, viewport_size), false)
     draw_rect(Rect2(Vector2.ZERO, viewport_size), Color(0.002, 0.008, 0.025, 0.78))
     _text_center("MISSION FAILED" if mission_failed else "MISSION COMPLETE", Vector2(viewport_size.x * 0.5, 175), 64, Color(1.0, 0.12, 0.18) if mission_failed else Color.WHITE)
-    _text_center(participant_name if not participant_name.is_empty() else "THE NEON WEAVER", Vector2(viewport_size.x * 0.5, 235), 29, Color(1.0, 0.08, 0.16))
-    _panel(Rect2(viewport_size.x * 0.5 - 410, 292, 820, 365), Color(0.015, 0.03, 0.075, 0.96))
+    _panel(Rect2(viewport_size.x * 0.5 - 410, 250, 820, 365), Color(0.015, 0.03, 0.075, 0.96))
     var rows := [
         "TOTAL SCORE          %06d" % score,
         "SPIDER-SENSE         %d%%" % spider_sense_score,
@@ -432,16 +372,15 @@ func _draw_results(viewport_size: Vector2) -> void:
         "COLLISION STRIKES    %d/%d" % [collision_strikes, max_collision_strikes],
     ]
     for index in rows.size():
-        _text(rows[index], Vector2(viewport_size.x * 0.5 - 320, 350 + index * 42), 23, Color.WHITE)
-    _text_center("RUN DISQUALIFIED" if mission_failed else _rank_label(), Vector2(viewport_size.x * 0.5, 720), 31, Color(1.0, 0.16, 0.2) if mission_failed else Color(0.1, 0.75, 1.0))
+        _text(rows[index], Vector2(viewport_size.x * 0.5 - 320, 308 + index * 42), 23, Color.WHITE)
+    _text_center("RUN DISQUALIFIED" if mission_failed else _rank_label(), Vector2(viewport_size.x * 0.5, 680), 31, Color(1.0, 0.16, 0.2) if mission_failed else Color(0.1, 0.75, 1.0))
     _text_center("TOO MANY COLLISIONS. TRY AGAIN." if mission_failed else "YOU MASTERED THE WEB.", Vector2(viewport_size.x * 0.5, 805), 25, Color.WHITE)
     _text_center("NOW BUILD THE TECHNOLOGY BEHIND IT.", Vector2(viewport_size.x * 0.5, 850), 22, Color(1.0, 0.15, 0.2))
     _panel(Rect2(70, 310, 400, 330), Color(0.01, 0.02, 0.055, 0.94))
     _text("TOP FIVE TODAY", Vector2(105, 355), 21, Color(0.1, 0.75, 1.0))
     for index in mini(5, leaderboard.size()):
         var entry: Dictionary = leaderboard[index]
-        var name := str(entry.get("codename", "Anonymous Hero"))
-        _text("%d  %s" % [index + 1, name.left(18)], Vector2(105, 405 + index * 40), 17, Color.WHITE)
+        _text("RUN %d" % (index + 1), Vector2(105, 405 + index * 40), 17, Color.WHITE)
         _text("%06d" % int(entry.get("score", 0)), Vector2(360, 405 + index * 40), 17, Color(1.0, 0.82, 0.18))
     var rank_text := "NO RANK - RUN FAILED" if mission_failed else "YOUR RANK  #%d" % daily_rank
     _text("PLAYERS TODAY  %d  |  %s" % [leaderboard.size(), rank_text], Vector2(105, 615), 15, Color(0.68, 0.8, 0.92))

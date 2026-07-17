@@ -32,7 +32,6 @@ var mission_failed := false
 var _capture_index := 0
 var _attract_captured := false
 var _capture_warmup := 0.0
-var _name_capture_captured := false
 var _result_saved := false
 var _was_firing := false
 var _tracking_loss_elapsed := 0.0
@@ -47,20 +46,11 @@ var _capture_real_started_ms := 0
 var _fps_samples := PackedFloat32Array()
 var _low_fps_elapsed := 0.0
 var _shot_feedback_time := 0.0
-var onboarding_mode: StringName = &"READY"
-var player_name := ""
-var air_name := AirNameEntry.new()
-var _pinch_was_active := false
-var _clear_hold := 0.0
-var _clear_latched := false
-var _name_confirm_hold := 0.0
 var _vision_command_peer := PacketPeerUDP.new()
 
 const PACKET_TIMEOUT_MS := 600
 const MAX_COLLISION_STRIKES := 3
 const READY_HOLD_SECONDS := 3.0
-const NAME_CONFIRM_SECONDS := 1.5
-const NAME_CLEAR_SECONDS := 0.8
 const CAPTURE_LEADERBOARD_PATH := "res://../artifacts/test_reports/capture_leaderboard.json"
 const INSTRUCTION_HINTS := {
     &"billboard": "LEAN OR STEP LEFT  |  KEYBOARD: Q / A",
@@ -110,12 +100,10 @@ func _ready() -> void:
         session.time_scale = 8.0
         _capture_real_started_ms = Time.get_ticks_msec()
     if boss_test:
-        player_name = "THE NEON WEAVER"
         _reset_run()
         _start_session(true)
         session.elapsed = 55.0
     elif skip_calibration:
-        player_name = "THE NEON WEAVER"
         _reset_run()
         _start_session(true)
 
@@ -159,12 +147,9 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
     if not event is InputEventKey or not event.pressed or event.echo:
         return
-    if not session.session_active and onboarding_mode == &"NAME_ENTRY" and event.keycode not in [KEY_F3, KEY_F4, KEY_F11, KEY_M]:
-        _handle_name_key(event)
-        return
-    if not session.session_active and onboarding_mode == &"READY" and event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+    if not session.session_active and event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
         if keyboard_only:
-            _begin_name_entry()
+            _request_session_start(false)
         else:
             hud.toast = "HOLD BOTH OPEN PALMS UNTIL THE LOCK COMPLETES"
             hud.toast_time = 3.0
@@ -442,15 +427,6 @@ func _update_presentation(delta: float) -> void:
     hud.hands_ready = keyboard_only or capture_mode or _camera_ready_dwell >= READY_HOLD_SECONDS
     hud.ready_hold_seconds = _camera_ready_dwell
     hud.ready_hold_required = READY_HOLD_SECONDS
-    hud.onboarding_mode = onboarding_mode
-    hud.participant_name = player_name if not player_name.is_empty() else air_name.name
-    hud.air_strokes = air_name.strokes
-    hud.air_cursor = air_name.cursor
-    hud.air_pen_down = air_name.pen_down
-    hud.air_prediction = air_name.predicted_letter
-    hud.air_confidence = air_name.confidence
-    hud.name_confirm_hold = _name_confirm_hold
-    hud.name_confirm_required = NAME_CONFIRM_SECONDS
     hud.keyboard_mode = keyboard_only
     hud.vision_managed = vision_managed
     hud.tracking_lost = session.session_active and not keyboard_only and _tracking_loss_elapsed >= 0.5
@@ -667,8 +643,6 @@ func _save_result_once() -> void:
         return
     score += int(boss.tension * 5000.0)
     saves.add_result({
-        "nickname": player_name,
-        "codename": player_name if not player_name.is_empty() else "The Neon Weaver",
         "score": score,
         "web_accuracy": chase.web_accuracy(),
         "spider_sense": _spider_sense_score(),
@@ -701,26 +675,10 @@ func _start_capture_after_warmup(delta: float) -> void:
         hud.hands_ready = false
         _save_capture("01_attract.png")
         _attract_captured = true
-        _prepare_air_name_capture()
         return
-    if not _name_capture_captured and _capture_warmup >= 1.5:
-        _save_capture("01_air_name.png")
-        _name_capture_captured = true
-        return
-    if _name_capture_captured and _capture_warmup >= 2.0:
-        player_name = "THE NEON WEAVER"
-        onboarding_mode = &"IN_MISSION"
+    if _attract_captured and _capture_warmup >= 1.0:
         _reset_run()
         _start_session(false)
-
-
-func _prepare_air_name_capture() -> void:
-    _begin_name_entry()
-    air_name.name = "AARA"
-    air_name.set_pen(Vector2(0.12, 0.12), true)
-    air_name.set_pen(Vector2(0.5, 0.88), true)
-    air_name.set_pen(Vector2(0.88, 0.12), true)
-    air_name.finish_stroke()
 
 
 func _capture_due_frames() -> void:
@@ -790,11 +748,8 @@ func _request_session_start(skip: bool = false) -> void:
         hud.toast_time = 4.0
         print("SESSION START BLOCKED  fresh=%s tracked=%s managed=%s" % [fresh, _player_tracked, vision_managed])
         return
-    if skip:
-        _reset_run()
-        _start_session(true)
-    else:
-        _begin_name_entry()
+    _reset_run()
+    _start_session(skip)
 
 
 static func camera_session_ready(
@@ -808,114 +763,23 @@ static func camera_session_ready(
     return packet_fresh and tracked and hand_count >= 2 and left_open and right_open and ready_dwell >= READY_HOLD_SECONDS
 
 
-func _update_onboarding(delta: float) -> void:
+func _update_onboarding(_delta: float) -> void:
     if session.session_active or capture_mode or boss_test or skip_calibration:
         return
-    if onboarding_mode == &"READY":
-        if not keyboard_only and camera_session_ready(
-            vision.is_fresh(PACKET_TIMEOUT_MS),
-            _player_tracked,
-            _hand_count,
-            _camera_ready_dwell,
-            bool(actions.get("palm_open_left", false)),
-            bool(actions.get("palm_open_right", false))
-        ):
-            _begin_name_entry()
-        return
-    if onboarding_mode != &"NAME_ENTRY":
-        return
-    if keyboard_only:
-        return
-    _update_air_name(delta)
-
-
-func _begin_name_entry() -> void:
-    print("ONBOARDING  OPEN-PALM LOCK -> NAME ENTRY")
-    onboarding_mode = &"NAME_ENTRY"
-    air_name = AirNameEntry.new()
-    player_name = ""
-    _pinch_was_active = false
-    _clear_hold = 0.0
-    _clear_latched = false
-    _name_confirm_hold = 0.0
-    hud.toast = ""
-    hud.toast_time = 0.0
-
-
-func _update_air_name(delta: float) -> void:
-    var left_fist := bool(actions.get("fist_left", false))
-    var right_fist := bool(actions.get("fist_right", false))
-    var both_fists := left_fist and right_fist
-    if both_fists:
-        air_name.finish_stroke()
-        _clear_hold += delta
-        if _clear_hold >= NAME_CLEAR_SECONDS and not _clear_latched:
-            var clearing_ink := air_name.has_ink()
-            air_name.undo()
-            _clear_latched = true
-            hud.toast = "CURRENT LETTER CLEARED" if clearing_ink else "UNDO"
-            hud.toast_time = 1.0
-    else:
-        _clear_hold = 0.0
-        _clear_latched = false
-        var use_right := right_fist or (not left_fist and _hand_count >= 2)
-        var cursor_target := Vector2(
-            float(actions.get("aim_right_x" if use_right else "aim_left_x", 0.5)),
-            float(actions.get("aim_right_y" if use_right else "aim_left_y", 0.5))
-        )
-        var smoothed := air_name.cursor.lerp(cursor_target, clampf(delta * 14.0, 0.0, 1.0))
-        air_name.set_pen(smoothed, left_fist != right_fist)
-        if not left_fist and not right_fist:
-            air_name.finish_stroke()
-    var pinch_active := str(actions.get("gesture_left", "OPEN")) == "PINCH" or str(actions.get("gesture_right", "OPEN")) == "PINCH"
-    if pinch_active and not _pinch_was_active and air_name.has_ink():
-        if air_name.accept_prediction():
-            hud.toast = "LETTER ACCEPTED"
-        else:
-            hud.toast = "DRAW A LARGER UPPERCASE BLOCK LETTER"
-        hud.toast_time = 1.2
-    _pinch_was_active = pinch_active
-    var both_open := bool(actions.get("palm_open_left", false)) and bool(actions.get("palm_open_right", false))
-    if both_open and not air_name.has_ink() and not air_name.name.is_empty():
-        _name_confirm_hold = minf(NAME_CONFIRM_SECONDS, _name_confirm_hold + delta)
-        if _name_confirm_hold >= NAME_CONFIRM_SECONDS:
-            _confirm_air_name()
-    else:
-        _name_confirm_hold = 0.0
-
-
-func _handle_name_key(event: InputEventKey) -> void:
-    if event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
-        if not air_name.name.is_empty():
-            _confirm_air_name()
-        else:
-            hud.toast = "TYPE YOUR NAME, THEN PRESS ENTER"
-        return
-    if event.keycode == KEY_BACKSPACE:
-        air_name.undo()
-        return
-    if event.unicode > 0:
-        air_name.append_typed(String.chr(event.unicode))
-
-
-func _confirm_air_name() -> void:
-    if air_name.name.is_empty():
-        return
-    player_name = air_name.name.left(AirNameEntry.MAX_NAME_LENGTH)
-    onboarding_mode = &"IN_MISSION"
-    _reset_run()
-    _start_session(false)
+    if not keyboard_only and camera_session_ready(
+        vision.is_fresh(PACKET_TIMEOUT_MS),
+        _player_tracked,
+        _hand_count,
+        _camera_ready_dwell,
+        bool(actions.get("palm_open_left", false)),
+        bool(actions.get("palm_open_right", false))
+    ):
+        print("ONBOARDING  OPEN-PALM LOCK -> MISSION")
+        _request_session_start(false)
 
 
 func _reset_onboarding() -> void:
-    onboarding_mode = &"READY"
-    player_name = ""
-    air_name = AirNameEntry.new()
     _camera_ready_dwell = 0.0
-    _pinch_was_active = false
-    _clear_hold = 0.0
-    _clear_latched = false
-    _name_confirm_hold = 0.0
 
 
 static func collision_limit_reached(strikes: int, limit: int = MAX_COLLISION_STRIKES) -> bool:

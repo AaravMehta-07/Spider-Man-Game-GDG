@@ -20,7 +20,6 @@ func _init() -> void:
     _test_finisher_always_completes()
     _test_udp_sequence_deduplication()
     _test_camera_start_policy()
-    _test_air_name_entry()
     _test_collision_failure_policy()
     _test_instruction_coverage()
     _test_leaderboard_sort_and_corruption()
@@ -242,31 +241,6 @@ func _test_camera_start_policy() -> void:
     _expect(not main_script.camera_session_ready(true, true, 2, 2.99, true, true), "camera session requires the full three-second lock")
 
 
-func _test_air_name_entry() -> void:
-    var entry = preload("res://scripts/ui/air_name_entry.gd").new()
-    entry.set_pen(Vector2(0.05, 0.95), true)
-    entry.set_pen(Vector2(0.5, 0.05), true)
-    entry.set_pen(Vector2(0.95, 0.95), true)
-    entry.finish_stroke()
-    entry.set_pen(Vector2(0.25, 0.6), true)
-    entry.set_pen(Vector2(0.75, 0.6), true)
-    entry.finish_stroke()
-    _expect(entry.has_ink(), "fist-controlled air pen records bounded strokes")
-    _expect(entry.predicted_letter == "A", "block-letter recognizer identifies a drawn A")
-    _expect(entry.accept_prediction(), "pinch accepts a confident recognized letter")
-    _expect(entry.name == "A" and not entry.has_ink(), "accepted air letter moves into the participant name")
-    entry.set_pen(Vector2(0.12, 0.12), true)
-    entry.set_pen(Vector2(0.5, 0.88), true)
-    entry.set_pen(Vector2(0.88, 0.12), true)
-    entry.finish_stroke()
-    _expect(entry.predicted_letter == "V", "natural diagonal V stroke is recognized as V")
-    entry.clear_glyph()
-    _expect(entry.append_typed("r") and entry.name == "AR", "keyboard fallback accepts uppercase-safe name input")
-    _expect(not entry.append_typed("!"), "name entry rejects punctuation outside the bounded allowlist")
-    entry.undo()
-    _expect(entry.name == "A", "undo removes the last accepted letter when the canvas is empty")
-
-
 func _test_collision_failure_policy() -> void:
     var main_script = preload("res://scripts/core/main.gd")
     _expect(not main_script.collision_limit_reached(2), "two obstacle collisions do not fail the run")
@@ -292,8 +266,8 @@ func _test_leaderboard_sort_and_corruption() -> void:
     var manager = preload("res://scripts/persistence/save_manager.gd").new()
     manager.file_path = "res://../artifacts/test_reports/test_leaderboard.json"
     manager.entries = []
-    manager.add_result({"score": 100, "codename": "First"})
-    manager.add_result({"score": 450, "codename": "Second"})
+    manager.add_result({"score": 100})
+    manager.add_result({"score": 450})
     _expect(int(manager.entries[0].get("score")) == 450, "leaderboard sorts highest score first")
     var corrupt := FileAccess.open(manager.file_path, FileAccess.WRITE)
     _expect(corrupt != null, "test leaderboard file opens")
