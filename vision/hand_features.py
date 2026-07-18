@@ -39,7 +39,7 @@ def is_open_palm(points: Sequence[HandLandmark]) -> bool:
     if is_fist(points):
         return False
     fingers_open = all(
-        _extended(points, tip, joint)
+        _extended(points, tip, joint) and not _curled(points, tip, joint)
         for tip, joint in ((8, 6), (12, 10), (16, 14), (20, 18))
     )
     thumb_clear = distance(points[4], points[5]) > palm_scale(points) * 0.42
@@ -47,14 +47,10 @@ def is_open_palm(points: Sequence[HandLandmark]) -> bool:
 
 
 def is_web_pose(points: Sequence[HandLandmark]) -> bool:
-    index_extended = _extended(points, 8, 6)
+    index_extended = _extended(points, 8, 6) and not _curled(points, 8, 6)
     middle_ring_curled = _curled(points, 12, 10) and _curled(points, 16, 14)
-    pinky_extended = _extended(points, 20, 18)
-    pinky_curled = _curled(points, 20, 18)
-    thumb_open = distance(points[4], points[2]) > palm_scale(points) * 0.22
-    classic_spider_pose = index_extended and pinky_extended and middle_ring_curled
-    single_index_pose = index_extended and pinky_curled and middle_ring_curled and thumb_open
-    return classic_spider_pose or single_index_pose
+    pinky_extended = _extended(points, 20, 18) and not _curled(points, 20, 18)
+    return index_extended and pinky_extended and middle_ring_curled
 
 
 def is_pinching(points: Sequence[HandLandmark], threshold: float | None = None) -> bool:

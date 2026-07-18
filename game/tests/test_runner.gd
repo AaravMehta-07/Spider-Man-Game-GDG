@@ -20,6 +20,8 @@ func _init() -> void:
     _test_boss_free_fire_and_target_lock()
     _test_finisher_always_completes()
     _test_udp_sequence_deduplication()
+    _test_udp_live_bind_and_loopback_policy()
+    _test_branding_layout_bounds()
     _test_camera_start_policy()
     _test_collision_failure_policy()
     _test_instruction_coverage()
@@ -244,6 +246,39 @@ func _test_udp_sequence_deduplication() -> void:
     receiver.free()
 
 
+func _test_udp_live_bind_and_loopback_policy() -> void:
+    var receiver = preload("res://scripts/networking/udp_vision_receiver.gd").new()
+    var stream_started := [false]
+    receiver.stream_started.connect(func(): stream_started[0] = true)
+    _expect(receiver.start_listening(0) == OK, "vision receiver binds on Windows-compatible IPv4 socket")
+    _expect(receiver.listening and receiver.peer.get_local_port() > 0, "vision receiver exposes a live local port")
+    _expect(receiver._is_loopback("127.0.0.1"), "IPv4 loopback packets are allowed")
+    _expect(receiver._is_loopback("::1"), "IPv6 loopback packets are allowed")
+    _expect(not receiver._is_loopback("192.168.1.20"), "LAN packets are rejected by policy")
+    var sender := PacketPeerUDP.new()
+    var port: int = receiver.peer.get_local_port()
+    _expect(sender.connect_to_host("127.0.0.1", port) == OK, "test sender connects to receiver")
+    var packet := JSON.stringify({"v": 1, "kind": "input", "data": {"session_id": "live", "sequence": 1, "tracked": true}}).to_utf8_buffer()
+    sender.put_packet(packet)
+    OS.delay_msec(20)
+    receiver._process(0.02)
+    _expect(receiver.latest_sequence == 1 and receiver.is_fresh(), "raw localhost UDP reaches gameplay receiver")
+    _expect(stream_started[0], "first localhost packet emits stream acknowledgment")
+    sender.close()
+    receiver.peer.close()
+    receiver.free()
+
+
+func _test_branding_layout_bounds() -> void:
+    var hud_script = preload("res://scripts/ui/hud.gd")
+    var attract_rect: Rect2 = hud_script.attract_brand_rect()
+    var results_rect: Rect2 = hud_script.results_brand_rect(Vector2(1920, 1080))
+    _expect(attract_rect.end.y + 18.0 <= hud_script.ATTRACT_TITLE_TOP, "home banner leaves a title safety gap")
+    _expect(results_rect.end.y + 30.0 <= hud_script.RESULTS_TITLE_TOP, "results banner leaves a title safety gap")
+    _expect(attract_rect.end.x < 700.0, "home banner stays inside the left content column")
+    _expect(is_equal_approx(results_rect.get_center().x, 960.0), "results banner remains centered")
+
+
 func _test_camera_start_policy() -> void:
     var main_script = preload("res://scripts/core/main.gd")
     _expect(not main_script.camera_session_ready(false, false), "camera session rejects missing service and player")
@@ -275,6 +310,9 @@ func _test_instruction_coverage() -> void:
         _expect(str(main_script.INSTRUCTION_HINTS[kind]).length() > 20, "instruction is actionable for %s" % kind)
     _expect("MOUSE + P" in str(main_script.INSTRUCTION_HINTS[&"barrier"]), "barrier keyboard hint includes web attachment plus pull")
     _expect("MOUSE + P" in str(main_script.INSTRUCTION_HINTS[&"debris"]), "debris keyboard hint includes web attachment plus pull")
+    for kind in [&"drone", &"swing", &"rescue", &"counter"]:
+        var hint := str(main_script.INSTRUCTION_HINTS[kind])
+        _expect("PINCH" not in hint and "CLENCH A FIST" not in hint, "fire instruction only teaches the accepted web pose for %s" % kind)
 
 
 func _test_leaderboard_sort_and_corruption() -> void:
@@ -297,6 +335,8 @@ func _test_leaderboard_sort_and_corruption() -> void:
 func _test_capture_uses_isolated_leaderboard_path() -> void:
     var main_script = preload("res://scripts/core/main.gd")
     _expect(main_script.CAPTURE_LEADERBOARD_PATH.begins_with("res://../artifacts/test_reports/"), "capture runs do not write the participant leaderboard")
+    var source := FileAccess.get_file_as_string("res://scripts/core/main.gd")
+    _expect('for _attempt in range(3)' not in source, "session synchronization is not applied three times")
 
 func _expect(condition: bool, message: String) -> void:
     if condition:

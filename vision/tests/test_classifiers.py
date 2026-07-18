@@ -45,6 +45,13 @@ def classic_spider_hand() -> list[Point]:
     return points
 
 
+def pinch_hand() -> list[Point]:
+    points = open_hand()
+    points[4].x = points[8].x
+    points[4].y = points[8].y
+    return points
+
+
 def fist_hand(wrist_y: float = 0.5) -> list[Point]:
     points = neutral_hand()
     points[0].y = wrist_y
@@ -93,7 +100,7 @@ def test_hand_shapes_and_aim() -> None:
     points[6].y = 0.5
     points[4].x = 0.7
     points[2].x = 0.5
-    assert is_web_pose(points)
+    assert not is_web_pose(points)
     points[4].x = points[8].x
     points[4].y = points[8].y
     assert is_pinching(points)
@@ -102,13 +109,17 @@ def test_hand_shapes_and_aim() -> None:
 
 def test_classic_index_and_pinky_spider_pose_is_recognized() -> None:
     assert is_web_pose(classic_spider_hand())
-    action = WebGestureClassifier().classify(classic_spider_hand(), 0.0)
+    classifier = WebGestureClassifier()
+    acquiring = classifier.classify(classic_spider_hand(), 0.0)
+    action = classifier.classify(classic_spider_hand(), 0.08)
+    assert not acquiring.trigger and not acquiring.held
     assert action.trigger and action.held and action.gesture == "SPIDER_POSE"
 
 
 def test_open_palm_is_explicit_not_an_unknown_hand_shape() -> None:
     assert is_open_palm(open_hand())
     assert not is_open_palm(fist_hand())
+    assert not is_open_palm(classic_spider_hand())
     assert WebGestureClassifier().classify(open_hand(), 0.0).open_palm
 
 
@@ -124,18 +135,20 @@ def test_snapshot_preserves_two_hand_average_aim() -> None:
 
 
 def test_web_trigger_is_edge_based() -> None:
-    points = web_hand()
+    points = classic_spider_hand()
     classifier = WebGestureClassifier()
-    assert classifier.classify(points).trigger is True
-    assert classifier.classify(points).trigger is False
+    assert classifier.classify(points, 0.0).trigger is False
+    assert classifier.classify(points, 0.08).trigger is True
+    assert classifier.classify(points, 0.10).trigger is False
 
 
 def test_web_attachment_stays_latched_through_fist_pull_then_releases() -> None:
     classifier = WebGestureClassifier()
-    fired = classifier.classify(web_hand(), 0.0)
-    pulled = classifier.classify(fist_hand(0.55), 0.1)
-    classifier.classify(neutral_hand(), 0.2)
-    released = classifier.classify(neutral_hand(), 0.4)
+    classifier.classify(classic_spider_hand(), 0.0)
+    fired = classifier.classify(classic_spider_hand(), 0.08)
+    pulled = classifier.classify(fist_hand(0.55), 0.18)
+    classifier.classify(neutral_hand(), 0.28)
+    released = classifier.classify(neutral_hand(), 0.48)
     assert fired.trigger and fired.held
     assert pulled.held and pulled.fist and pulled.pull > 0.9
     assert not released.held
@@ -145,21 +158,47 @@ def test_pull_strength_is_frame_rate_independent() -> None:
     strengths: list[float] = []
     for fps in (10, 18, 30, 60):
         classifier = WebGestureClassifier()
-        classifier.classify(web_hand(), 0.0)
+        classifier.classify(classic_spider_hand(), 0.0)
+        classifier.classify(classic_spider_hand(), 0.08)
         elapsed = 1.0 / fps
-        strengths.append(classifier.classify(fist_hand(0.5 + 0.3 * elapsed), elapsed).pull)
+        strengths.append(
+            classifier.classify(fist_hand(0.5 + 0.3 * elapsed), 0.08 + elapsed).pull
+        )
     assert max(strengths) - min(strengths) < 0.01
     assert min(strengths) > 0.8
 
 
-def test_missing_hand_resets_attachment_and_fist_becomes_a_new_shot() -> None:
+def test_missing_hand_resets_attachment_and_fist_does_not_shoot() -> None:
     classifier = WebGestureClassifier()
-    classifier.classify(web_hand(), 0.0)
+    classifier.classify(classic_spider_hand(), 0.0)
+    classifier.classify(classic_spider_hand(), 0.08)
     for _ in range(3):
         classifier.mark_missing()
     action = classifier.classify(fist_hand(0.8), 1.0)
-    assert action.trigger and action.held and action.pull == 0.0
-    assert action.gesture == "FIST_SHOT"
+    assert not action.trigger and not action.held and action.pull == 0.0
+    assert action.gesture == "FIST"
+
+
+def test_brief_or_interrupted_spider_pose_never_fires() -> None:
+    classifier = WebGestureClassifier(trigger_hold=0.08)
+    assert not classifier.classify(classic_spider_hand(), 0.0).trigger
+    assert not classifier.classify(classic_spider_hand(), 0.04).trigger
+    assert not classifier.classify(open_hand(), 0.05).trigger
+    assert not classifier.classify(classic_spider_hand(), 0.10).trigger
+    assert classifier.classify(classic_spider_hand(), 0.18).trigger
+
+
+def test_aiming_shapes_never_fire_or_consume_web() -> None:
+    for points, expected_gesture in (
+        (open_hand(), "OPEN"),
+        (pinch_hand(), "PINCH"),
+        (fist_hand(), "FIST"),
+        (web_hand(), "OPEN"),
+    ):
+        action = WebGestureClassifier().classify(points, 0.0)
+        assert not action.trigger
+        assert not action.held
+        assert action.gesture == expected_gesture
 
 
 def test_calibration_waits_for_timeout_and_rejects_single_sample_profile() -> None:

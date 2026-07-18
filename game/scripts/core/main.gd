@@ -54,19 +54,19 @@ const READY_HOLD_SECONDS := 3.0
 const CAPTURE_LEADERBOARD_PATH := "res://../artifacts/test_reports/capture_leaderboard.json"
 const INSTRUCTION_HINTS := {
     &"billboard": "LEAN OR STEP LEFT  |  KEYBOARD: Q / A",
-    &"drone": "AIM BOTH HANDS, THEN USE THE CLASSIC WEB POSE OR CLENCH A FIST  |  MOUSE CLICK",
+    &"drone": "AIM BOTH HANDS; INDEX + PINKY OUT, MIDDLE + RING FOLDED  |  MOUSE CLICK",
     &"vent": "JUMP UP WITH BOTH FEET  |  KEYBOARD: SPACE",
     &"barrier": "AIM + FIRE, CLOSE YOUR FIST, THEN PULL YOUR ARM BACK  |  HOLD MOUSE + P",
     &"scaffold": "CROUCH LOW  |  KEYBOARD: S",
-    &"swing": "POINT AT THE ANCHOR, THEN PINCH / WEB POSE TO FIRE  |  MOUSE CLICK",
-    &"rescue": "AIM AT THE CIVILIAN, THEN PINCH / WEB POSE TO FIRE  |  MOUSE CLICK",
+    &"swing": "POINT AT THE ANCHOR, THEN USE THE CLASSIC WEB POSE  |  MOUSE CLICK",
+    &"rescue": "AIM AT THE CIVILIAN, THEN USE THE CLASSIC WEB POSE  |  MOUSE CLICK",
     &"crane": "LEAN OR STEP RIGHT  |  KEYBOARD: E / D",
     &"shockwave": "RAISE BOTH FOREARMS TO FORM A SHIELD  |  KEYBOARD: F",
     &"collapse": "AIM BOTH HANDS, THEN FIRE BOTH WEBS  |  LEFT + RIGHT MOUSE",
     &"right_slash": "LEAN OR STEP LEFT  |  KEYBOARD: Q / A",
     &"overhead": "CROUCH LOW  |  KEYBOARD: S",
     &"energy": "RAISE BOTH FOREARMS TO FORM A SHIELD  |  KEYBOARD: F",
-    &"counter": "KEEP THE RETICLE ON THE BOSS, THEN WEB POSE OR CLENCH A FIST  |  MOUSE CLICK",
+    &"counter": "KEEP THE RETICLE ON THE BOSS, THEN USE THE CLASSIC WEB POSE  |  MOUSE CLICK",
     &"debris": "FIRE, CLOSE YOUR FIST, PULL BACK, THEN RELEASE  |  HOLD MOUSE + P",
     &"ground_wave": "JUMP UP WITH BOTH FEET  |  KEYBOARD: SPACE",
 }
@@ -116,6 +116,7 @@ func _isolate_capture_leaderboard() -> void:
 
 
 func _connect_systems() -> void:
+    vision.stream_started.connect(_on_vision_stream_started)
     session.state_changed.connect(_on_state_changed)
     session.state_changed.connect(audio.on_state_changed)
     session.session_finished.connect(_on_session_finished)
@@ -422,6 +423,8 @@ func _update_presentation(delta: float) -> void:
     hud.hand_confidence = float(telemetry.get("hand_confidence", 0.0))
     hud.packet_age_ms = float(Time.get_ticks_msec() - vision.last_packet_ms) if vision.last_packet_ms >= 0 else -1.0
     hud.camera_ready = keyboard_only or vision.is_fresh(PACKET_TIMEOUT_MS)
+    hud.vision_receiver_ready = vision.listening
+    hud.vision_receiver_error = vision.listen_error
     hud.player_tracked = keyboard_only or _player_tracked
     hud.hand_count = _hand_count
     hud.hands_ready = keyboard_only or capture_mode or _camera_ready_dwell >= READY_HOLD_SECONDS
@@ -622,7 +625,7 @@ func _state_instruction(current: StringName) -> String:
         SessionController.CALIBRATION:
             return "STAND CENTERED WITH YOUR FULL UPPER BODY AND BOTH HANDS VISIBLE"
         SessionController.WEB_VERIFICATION:
-            return "AIM WITH BOTH HANDS  |  CLASSIC WEB POSE, PINCH, OR CLENCH A FIST TO FIRE"
+            return "AIM WITH BOTH HANDS  |  INDEX + PINKY OUT, MIDDLE + RING FOLDED"
         SessionController.CHASE:
             return "LEAN TO MOVE  |  FOLLOW EACH RED ACTION PROMPT"
         SessionController.BOSS_INTRO:
@@ -724,8 +727,7 @@ func _reset_run() -> void:
 
 
 func _start_session(skip: bool = false) -> void:
-    for _attempt in range(3):
-        _send_vision_command({"command": "sync_session"})
+    _send_vision_command({"command": "sync_session"})
     session.start_session(skip)
     print("SESSION START  mode=%s tracked=%s" % ["keyboard" if keyboard_only else "camera", _player_tracked])
 
@@ -785,6 +787,9 @@ func _reset_onboarding() -> void:
 
 static func collision_limit_reached(strikes: int, limit: int = MAX_COLLISION_STRIKES) -> bool:
     return strikes >= maxi(1, limit)
+
+func _on_vision_stream_started() -> void:
+    _send_vision_command({"command": "game_input_active"})
 
 func _send_vision_command(command: Dictionary) -> void:
     var error := _vision_command_peer.connect_to_host("127.0.0.1", _health_port)

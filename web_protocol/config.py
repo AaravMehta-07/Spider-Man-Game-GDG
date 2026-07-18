@@ -75,7 +75,10 @@ class ProjectConfig:
         self._number(calibration, "jump_threshold", 0.01, 0.5)
         self._number(calibration, "crouch_threshold", 0.01, 0.5)
         self._number(calibration, "dodge_velocity_threshold", 0.1, 5.0)
+        self._number(gestures, "trigger_hold_ms", 0, 500)
+        self._number(gestures, "trigger_release_ms", 50, 500)
         self._number(gestures, "pull_threshold", 0.01, 1.0)
+        self._number(gestures, "double_web_hold_ms", 0, 1000)
         for port_key, section in (("udp_port", game), ("health_port", game)):
             self._number(section, port_key, 1024, 65535)
         if game.get("udp_host") != "127.0.0.1":

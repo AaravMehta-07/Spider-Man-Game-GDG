@@ -33,6 +33,7 @@ def test_health_heartbeat_round_trip() -> None:
         assert response["ready"] is True
         assert response["mode"] == "test"
         assert response["packets_sent"] == 12
+        assert response["game_input_active"] is False
         assert response["camera_connected"] is False
         assert response["frames_captured"] == 0
         assert response["inference_frames"] == 0
@@ -128,6 +129,12 @@ def test_operator_command_queue_is_bounded_and_delivered() -> None:
             reply, _ = client.recvfrom(128)
         assert reply == b'{"ok":true}'
         assert state.drain_commands() == [{"command": "restart_camera"}]
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            client.settimeout(0.5)
+            client.sendto(b'{"command":"game_input_active"}', ("127.0.0.1", port))
+            active_reply, _ = client.recvfrom(128)
+        assert active_reply == b'{"ok":true}'
+        assert state.drain_commands() == [{"command": "game_input_active"}]
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
             client.settimeout(0.5)
             client.sendto(

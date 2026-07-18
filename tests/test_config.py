@@ -32,6 +32,8 @@ def test_invalid_configuration_is_rejected(tmp_path: Path) -> None:
         {"vision": {"inference_width": 0}},
         {"vision": {"capture_width": "wide"}},
         {"calibration": {"minimum_samples": 0}},
+        {"gestures": {"trigger_hold_ms": -1}},
+        {"gestures": {"trigger_release_ms": 10}},
     ],
 )
 def test_runtime_unsafe_overrides_are_rejected(tmp_path: Path, override: dict) -> None:

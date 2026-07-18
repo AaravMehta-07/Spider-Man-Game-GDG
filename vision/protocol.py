@@ -60,7 +60,7 @@ class InputSnapshot:
         self.pose_confidence = max(0.0, min(1.0, float(self.pose_confidence)))
         self.hand_confidence = max(0.0, min(1.0, float(self.hand_confidence)))
         self.hand_count = max(0, min(2, int(self.hand_count)))
-        allowed_gestures = {"OPEN", "SPIDER_POSE", "PINCH", "FIST_SHOT", "PULL", "WEB_HELD"}
+        allowed_gestures = {"OPEN", "SPIDER_POSE", "PINCH", "FIST", "PULL", "WEB_HELD"}
         self.gesture_left = self.gesture_left if self.gesture_left in allowed_gestures else "OPEN"
         self.gesture_right = (
             self.gesture_right if self.gesture_right in allowed_gestures else "OPEN"

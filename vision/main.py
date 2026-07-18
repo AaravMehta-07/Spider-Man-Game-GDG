@@ -72,6 +72,8 @@ def run_simulator(
                         started = now
                         player = ScriptedPlayer(session_id=uuid4().hex)
                         logger.info("simulated vision session synchronized")
+                    elif command.get("command") == "game_input_active":
+                        health.game_input_active = True
                 elapsed = ((now - started) * max(0.1, time_scale)) % 90.0
                 snapshot = player.sample(elapsed)
                 snapshot.camera_fps = float(network["snapshot_hz"])
@@ -100,7 +102,10 @@ def _hand_actions(
         label = "Right"
         if index < len(result.handedness) and result.handedness[index]:
             label = result.handedness[index][0].category_name
-        classifier = classifiers.setdefault(label, WebGestureClassifier())
+        classifier = classifiers.get(label)
+        if classifier is None:
+            classifier = WebGestureClassifier()
+            classifiers[label] = classifier
         actions[label] = classifier.classify(landmarks, timestamp)
     for label, classifier in classifiers.items():
         if label not in actions:
@@ -183,6 +188,7 @@ def run_live(
     vision_config = config.section("vision")
     models = config.section("models")
     calibration = config.section("calibration")
+    gestures = config.section("gestures")
     root = config.root
     camera_id = args.camera if args.camera is not None else int(vision_config["camera_id"])
     camera = CameraService(
@@ -205,7 +211,14 @@ def run_live(
     camera.start()
     samples: list[PoseFeatures] = []
     movement: MovementClassifier | None = None
-    hands = {"Left": WebGestureClassifier(), "Right": WebGestureClassifier()}
+    classifier_options = {
+        "release_grace": float(gestures["trigger_release_ms"]) / 1000.0,
+        "trigger_hold": float(gestures["trigger_hold_ms"]) / 1000.0,
+    }
+    hands = {
+        "Left": WebGestureClassifier(**classifier_options),
+        "Right": WebGestureClassifier(**classifier_options),
+    }
     session_id = uuid4().hex
     sequence = 0
     last_frame_sequence = 0
@@ -233,6 +246,8 @@ def run_live(
                         health.calibrated = False
                         health.calibration_samples = 0
                         logger.info("vision session synchronized; calibration restarted")
+                    elif name == "game_input_active":
+                        health.game_input_active = True
                     elif name == "restart_camera":
                         camera.request_restart()
                         samples.clear()

@@ -21,11 +21,12 @@ dev = ["pytest==8.3.5", "ruff==0.9.10"]
 
 [tool.pytest.ini_options]
 testpaths = ["vision/tests", "tests"]
-addopts = "-q"
+addopts = "-q -p no:asyncio"
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["artifacts/prd_work"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

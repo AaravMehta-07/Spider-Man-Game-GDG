@@ -1,10 +1,11 @@
 class_name UdpVisionReceiver
 extends Node
 
+signal stream_started
+
 const MAX_PACKET_BYTES := 8192
 
-var server := UDPServer.new()
-var peers: Array[PacketPeerUDP] = []
+var peer := PacketPeerUDP.new()
 var latest: Dictionary = {}
 var latest_sequence := -1
 var latest_session_id := ""
@@ -14,26 +15,43 @@ var packet_rate := 0.0
 var _packets_this_second := 0
 var _rate_elapsed := 0.0
 var enabled := true
+var listening := false
+var listen_error := OK
+var _reported_first_packet := false
 
 
 func _ready() -> void:
     var port := _argument_port("--udp-port=", 42420)
-    var error := server.listen(port, "127.0.0.1")
-    if error != OK:
-        push_error("Vision UDP listen failed: %s" % error)
+    start_listening(port)
+
+
+func start_listening(port: int) -> int:
+    peer.close()
+    peer = PacketPeerUDP.new()
+    # Godot 4.7.1 on Windows can reject an IPv4 loopback-only bind with
+    # ERR_UNAVAILABLE. Bind IPv4-any, then enforce loopback per packet.
+    listen_error = peer.bind(port, "0.0.0.0")
+    listening = listen_error == OK
+    if not listening:
+        push_error("Vision UDP listen failed on port %d: %s" % [port, listen_error])
+        return listen_error
+    print("Vision UDP listening on 127.0.0.1:%d (loopback enforced)" % port)
+    return OK
 
 
 func _process(delta: float) -> void:
-    if not enabled:
+    if not enabled or not listening:
         return
-    server.poll()
-    while server.is_connection_available():
-        if peers.size() >= 4:
-            peers.pop_front()
-        peers.append(server.take_connection())
-    for peer in peers:
-        while peer.get_available_packet_count() > 0:
-            _accept_packet(peer.get_packet())
+    while peer.get_available_packet_count() > 0:
+        var packet := peer.get_packet()
+        var source_ip := peer.get_packet_ip()
+        if not _is_loopback(source_ip):
+            continue
+        _accept_packet(packet)
+        if not _reported_first_packet:
+            _reported_first_packet = true
+            stream_started.emit()
+            print("Vision UDP stream active from %s" % source_ip)
     _rate_elapsed += delta
     if _rate_elapsed >= 1.0:
         packet_rate = _packets_this_second / _rate_elapsed
@@ -92,6 +110,11 @@ func is_fresh(max_age_ms: int = 350) -> bool:
     return last_packet_ms >= 0 and Time.get_ticks_msec() - last_packet_ms < max_age_ms
 
 
+func _exit_tree() -> void:
+    peer.close()
+    listening = false
+
+
 static func _argument_port(prefix: String, fallback: int) -> int:
     for argument in OS.get_cmdline_user_args():
         if argument.begins_with(prefix):
@@ -99,3 +122,7 @@ static func _argument_port(prefix: String, fallback: int) -> int:
             if parsed >= 1024 and parsed <= 65535:
                 return parsed
     return fallback
+
+
+static func _is_loopback(address: String) -> bool:
+    return address == "127.0.0.1" or address == "::1" or address.begins_with("::ffff:127.")

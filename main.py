@@ -263,13 +263,25 @@ def launch(config: ProjectConfig, options: LaunchOptions, logger: object) -> int
                 )
                 report_path = ROOT / "artifacts" / "test_reports" / report_name
                 report_path.parent.mkdir(parents=True, exist_ok=True)
-                report_path.write_text(json.dumps(health or {}, indent=2), encoding="utf-8")
+                runtime_text = (
+                    runtime_log.read_text(encoding="utf-8", errors="replace")
+                    if runtime_log.is_file()
+                    else ""
+                )
+                udp_stream_active = bool((health or {}).get("game_input_active", False))
+                udp_listen_failed = "Vision UDP listen failed" in runtime_text
+                report = dict(health or {})
+                report["godot_udp_stream_active"] = udp_stream_active
+                report["godot_udp_listen_failed"] = udp_listen_failed
+                report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
                 healthy = bool(
                     health
                     and health.get("instance_id") == instance_id
                     and health.get("ready")
                     and 0.0 <= float(health.get("packet_age_ms", -1.0)) < 1000.0
                     and int(health.get("packets_sent", 0)) > 0
+                    and udp_stream_active
+                    and not udp_listen_failed
                 )
                 return 0 if healthy else 22
             if vision.poll() is not None and not vision_restarted:

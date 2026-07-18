@@ -14,7 +14,7 @@ def test_snapshot_round_trip_and_clamping() -> None:
         web_right_trigger=True,
         fist_right=True,
         palm_open_left=True,
-        gesture_right="FIST_SHOT",
+        gesture_right="FIST",
     )
     decoded = decode_snapshot(encode_snapshot(source))
     assert decoded.sequence == 7
@@ -27,7 +27,7 @@ def test_snapshot_round_trip_and_clamping() -> None:
     assert decoded.web_right_trigger is True
     assert decoded.fist_right is True
     assert decoded.palm_open_left is True
-    assert decoded.gesture_right == "FIST_SHOT"
+    assert decoded.gesture_right == "FIST"
 
 
 def test_snapshot_rejects_unknown_gesture_labels() -> None:

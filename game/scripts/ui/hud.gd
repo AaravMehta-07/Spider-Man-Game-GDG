@@ -1,6 +1,9 @@
 class_name GameHud
 extends Control
 
+const ATTRACT_TITLE_TOP := 158.0
+const RESULTS_TITLE_TOP := 150.0
+
 var state: StringName = &"ATTRACT"
 var elapsed := 0.0
 var score := 0
@@ -18,6 +21,8 @@ var hand_count := 0
 var hands_ready := false
 var keyboard_mode := false
 var vision_managed := false
+var vision_receiver_ready := true
+var vision_receiver_error := 0
 var tracking_lost := false
 var tracking_loss_seconds := 0.0
 var diagnostics_visible := false
@@ -129,6 +134,24 @@ func _draw_vignette(viewport_size: Vector2) -> void:
         Vector2(viewport_size.x, viewport_size.y - 175)
     ]), Color(0.005, 0.012, 0.035, 0.92))
 
+static func attract_brand_rect() -> Rect2:
+    return Rect2(82, 28, 520, 112)
+
+
+static func results_brand_rect(viewport_size: Vector2) -> Rect2:
+    return Rect2(viewport_size.x * 0.5 - 210, 20, 420, 88)
+
+
+func _draw_brand_banner(rect: Rect2) -> void:
+    draw_rect(rect, Color(0.96, 0.98, 1.0, 0.96))
+    draw_rect(rect, Color(0.18, 0.82, 1.0, 0.92), false, 2.0)
+    var target := rect.grow(-12.0)
+    var source_size := gdg_logo_horizontal.get_size()
+    var image_scale := minf(target.size.x / source_size.x, target.size.y / source_size.y)
+    var image_size := source_size * image_scale
+    var image_rect := Rect2(target.position + (target.size - image_size) * 0.5, image_size)
+    draw_texture_rect(gdg_logo_horizontal, image_rect, false)
+
 func _draw_attract(viewport_size: Vector2) -> void:
     draw_texture_rect(attract_background, Rect2(Vector2.ZERO, viewport_size), false)
     draw_rect(Rect2(Vector2.ZERO, viewport_size), Color(0.002, 0.008, 0.025, 0.30))
@@ -136,9 +159,8 @@ func _draw_attract(viewport_size: Vector2) -> void:
         Vector2(0, 0), Vector2(viewport_size.x * 0.59, 0),
         Vector2(viewport_size.x * 0.48, viewport_size.y), Vector2(0, viewport_size.y)
     ]), Color(0.002, 0.006, 0.02, 0.76))
-    draw_rect(Rect2(82, 32, 610, 146), Color(0.96, 0.98, 1.0, 0.94))
-    draw_rect(Rect2(82, 32, 610, 146), Color(0.18, 0.82, 1.0, 0.9), false, 2.0)
-    draw_texture_rect(gdg_logo_horizontal, Rect2(108, 52, 560, 114), false)
+    _draw_brand_banner(attract_brand_rect())
+
     _text("WEB//PROTOCOL", Vector2(105, 240), 82, Color.WHITE)
     _text("SPIDER-SENSE", Vector2(111, 312), 39, Color(1.0, 0.08, 0.16))
     draw_line(Vector2(108, 345), Vector2(780, 345), Color(0.02, 0.72, 1.0), 5)
@@ -155,6 +177,8 @@ func _draw_attract(viewport_size: Vector2) -> void:
         _text("OPEN PALMS  %.1f / %.1f SEC" % [ready_hold_seconds, ready_hold_required], Vector2(142, 593), 23, Color.WHITE)
     elif camera_ready:
         _text("STEP INTO FRAME TO BEGIN", Vector2(142, 593), 25, Color.WHITE)
+    elif not vision_receiver_ready:
+        _text("INPUT LINK ERROR", Vector2(142, 593), 25, Color.WHITE)
     else:
         _text("CAMERA SERVICE OFFLINE", Vector2(142, 593), 25, Color.WHITE)
     _text("F4  CAMERA / KEYBOARD MODE", Vector2(108, 660), 19, Color(0.72, 0.86, 1.0))
@@ -175,7 +199,7 @@ func _draw_attract_camera(viewport_size: Vector2) -> void:
     var rect := Rect2(viewport_size.x - 590, 395, 520, 178)
     _panel(rect, Color(0.005, 0.016, 0.045, 0.94))
     _text("INPUT STATUS", rect.position + Vector2(28, 38), 18, Color(0.2, 0.78, 1.0))
-    var label := "KEYBOARD READY" if keyboard_mode else "CAMERA READY" if camera_ready else "CAMERA OFFLINE"
+    var label := "KEYBOARD READY" if keyboard_mode else "INPUT LINK ERROR" if not vision_receiver_ready else "CAMERA READY" if camera_ready else "CAMERA OFFLINE"
     var status_color := Color(0.25, 1.0, 0.55) if keyboard_mode or (camera_ready and player_tracked and hands_ready) else Color(1.0, 0.72, 0.18) if camera_ready else Color(1.0, 0.2, 0.28)
     _text(label, rect.position + Vector2(28, 78), 25, status_color)
     if keyboard_mode:
@@ -190,6 +214,9 @@ func _draw_attract_camera(viewport_size: Vector2) -> void:
     elif camera_ready:
         _text("STAND CENTERED, FACING THE CAMERA", rect.position + Vector2(28, 116), 17, Color.WHITE)
         _text("KEEP YOUR UPPER BODY + HANDS VISIBLE", rect.position + Vector2(28, 146), 16, Color(0.72, 0.86, 1.0))
+    elif not vision_receiver_ready:
+        _text("GAME INPUT RECEIVER UNAVAILABLE", rect.position + Vector2(28, 116), 17, Color.WHITE)
+        _text("RESTART WITH python main.py  |  ERROR %d" % vision_receiver_error, rect.position + Vector2(28, 146), 15, Color(0.72, 0.86, 1.0))
     else:
         var offline_help := "CAMERA SERVICE RECONNECTING" if vision_managed else "START THE GAME USING run.bat"
         _text(offline_help, rect.position + Vector2(28, 116), 18, Color.WHITE)
@@ -201,7 +228,7 @@ func _draw_quick_controls(viewport_size: Vector2) -> void:
     _panel(rect, Color(0.005, 0.016, 0.045, 0.94))
     _text("HOW TO PLAY", rect.position + Vector2(30, 42), 24, Color.WHITE)
     _control_row(rect, 88, "AIM", "CENTER BOTH HANDS ON THE TARGET", "MOVE MOUSE")
-    _control_row(rect, 145, "FIRE / ATTACK", "WEB POSE / PINCH / FIST", "MOUSE CLICK")
+    _control_row(rect, 145, "FIRE / ATTACK", "INDEX + PINKY OUT; MIDDLE + RING IN", "MOUSE CLICK")
     _control_row(rect, 202, "PULL", "FIRE, CLOSE FIST + PULL BACK", "MOUSE + P")
     _control_row(rect, 259, "DODGE / MOVE", "LEAN OR STEP LEFT / RIGHT", "A / D")
     _control_row(rect, 316, "JUMP / CROUCH", "JUMP UP / CROUCH LOW", "SPACE / S")
@@ -266,7 +293,7 @@ func _default_prompt() -> String:
 func _default_instruction() -> String:
     match state:
         &"CALIBRATION": return "STAND CENTERED WITH YOUR UPPER BODY AND BOTH HANDS VISIBLE"
-        &"WEB_VERIFICATION": return "CLASSIC WEB POSE, PINCH, OR CLENCH A FIST TO FIRE"
+        &"WEB_VERIFICATION": return "INDEX + PINKY OUT; FOLD MIDDLE + RING TO FIRE"
         &"CHASE": return "LEAN TO MOVE  |  FOLLOW EACH ACTION PROMPT"
         &"BOSS_COMBAT": return "CENTER BOTH HANDS FOR TARGET LOCK, THEN FIRE"
         &"FINISHER": return "FIRE BOTH WEBS, THEN PULL BOTH ARMS BACK"
@@ -373,9 +400,8 @@ func _draw_toast(viewport_size: Vector2) -> void:
 func _draw_results(viewport_size: Vector2) -> void:
     draw_texture_rect(attract_background, Rect2(Vector2.ZERO, viewport_size), false)
     draw_rect(Rect2(Vector2.ZERO, viewport_size), Color(0.002, 0.008, 0.025, 0.78))
-    draw_rect(Rect2(viewport_size.x * 0.5 - 238, 18, 476, 112), Color(0.96, 0.98, 1.0, 0.94))
-    draw_rect(Rect2(viewport_size.x * 0.5 - 238, 18, 476, 112), Color(0.18, 0.82, 1.0, 0.9), false, 2.0)
-    draw_texture_rect(gdg_logo_horizontal, Rect2(viewport_size.x * 0.5 - 218, 30, 436, 89), false)
+    _draw_brand_banner(results_brand_rect(viewport_size))
+
     _text_center("MISSION FAILED" if mission_failed else "MISSION COMPLETE", Vector2(viewport_size.x * 0.5, 215), 58, Color(1.0, 0.32, 0.24) if mission_failed else Color.WHITE)
     _panel(Rect2(viewport_size.x * 0.5 - 410, 270, 820, 365), Color(0.015, 0.03, 0.075, 0.96))
     var rows := [
@@ -402,8 +428,19 @@ func _draw_results(viewport_size: Vector2) -> void:
     var rank_text := "NO RANK - RUN FAILED" if mission_failed else "YOUR RANK  #%d" % daily_rank
     _text("PLAYERS TODAY  %d  |  %s" % [leaderboard.size(), rank_text], Vector2(105, 615), 15, Color(0.68, 0.8, 0.92))
     _panel(Rect2(viewport_size.x - 390, 310, 270, 330), Color(1.0, 1.0, 1.0, 0.96))
-    draw_texture_rect(recruitment_qr, Rect2(viewport_size.x - 370, 330, 230, 230), false)
-    var qr_label := "SCAN TO BUILD THE FUTURE" if recruitment_qr_ready else "EVENT QR NOT CONFIGURED"
+    var recruitment_rect := Rect2(viewport_size.x - 370, 330, 230, 230)
+    if recruitment_qr_ready:
+        draw_texture_rect(recruitment_qr, recruitment_rect, false)
+    else:
+        var logo_size := gdg_logo_stacked.get_size()
+        var logo_scale := minf(recruitment_rect.size.x / logo_size.x, recruitment_rect.size.y / logo_size.y)
+        var contained_size := logo_size * logo_scale
+        draw_texture_rect(
+            gdg_logo_stacked,
+            Rect2(recruitment_rect.position + (recruitment_rect.size - contained_size) * 0.5, contained_size),
+            false
+        )
+    var qr_label := "SCAN TO BUILD THE FUTURE" if recruitment_qr_ready else "GDG ON CAMPUS"
     _text_center(qr_label, Vector2(viewport_size.x - 255, 605), 15, Color(0.02, 0.04, 0.1))
     _text_center("DAILY HIGH  %06d" % high_score, Vector2(viewport_size.x * 0.5, 912), 18, Color(1.0, 0.82, 0.18))
 
@@ -466,7 +503,7 @@ func _draw_operator(viewport_size: Vector2) -> void:
         _operator_row(rect, 205, "Jump sensitivity", "0.100", "YAML")
         _operator_row(rect, 255, "Crouch sensitivity", "0.120", "YAML")
         _operator_row(rect, 305, "Dodge sensitivity", "0.850", "YAML")
-        _operator_row(rect, 355, "Web trigger", "POSE + PINCH + RELEASE", "AUTO")
+        _operator_row(rect, 355, "Web trigger", "CLASSIC WEB POSE + RELEASE", "AUTO")
         _operator_row(rect, 405, "Web threshold", "80 ms", "YAML")
         _operator_row(rect, 455, "Aim smoothing", "32%", "YAML")
         _operator_row(rect, 505, "Web endurance assist", "%d%% ADAPTIVE" % int(assist_level * 100.0), "AUTO")

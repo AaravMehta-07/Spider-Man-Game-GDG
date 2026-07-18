@@ -23,6 +23,7 @@ class HealthState:
     frames_captured: int = 0
     inference_frames: int = 0
     packets_sent: int = 0
+    game_input_active: bool = False
     reconnects: int = 0
     calibrated: bool = False
     calibration_samples: int = 0
@@ -50,6 +51,7 @@ class HealthState:
                 "frames_captured": self.frames_captured,
                 "inference_frames": self.inference_frames,
                 "packets_sent": self.packets_sent,
+                "game_input_active": self.game_input_active,
                 "reconnects": self.reconnects,
                 "last_error": self.last_error,
                 "uptime": round(monotonic() - self.started_at, 2),
@@ -115,7 +117,7 @@ class UdpHealthServer:
     @staticmethod
     def _valid_command(command: dict[str, object]) -> bool:
         name = command.get('command')
-        if name in {'sync_session', 'restart_camera'}:
+        if name in {'sync_session', 'restart_camera', 'game_input_active'}:
             return len(command) == 1
         if name == 'set_camera':
             camera_id = command.get('camera_id')
