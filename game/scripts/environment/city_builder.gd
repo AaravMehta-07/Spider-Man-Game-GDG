@@ -72,7 +72,7 @@ func reset_dynamic_objects() -> void:
 func play_set_piece(kind: StringName) -> void:
     if kind in [&"boss_reveal", &"right_slash", &"overhead", &"energy", &"counter", &"debris", &"ground_wave"]:
         _pulse_boss(kind)
-        if kind in [&"debris", &"ground_wave"]:
+        if kind != &"boss_reveal":
             _spawn_piece(kind)
         return
     _spawn_piece(kind)
@@ -104,6 +104,13 @@ func _move_set_pieces(travel: float, delta: float) -> void:
             piece.position.y += velocity_y * delta
         var spin: Vector3 = piece.get_meta("spin", Vector3.ZERO)
         piece.rotation += spin * delta
+        if piece.has_meta("life"):
+            var life := float(piece.get_meta("life")) - delta
+            piece.set_meta("life", life)
+            if life <= 0.0:
+                _set_pieces.erase(piece)
+                piece.queue_free()
+                continue
         if piece.has_meta("wobble"):
             piece.rotation.z += sin(Time.get_ticks_msec() * 0.006) * float(piece.get_meta("wobble")) * delta
         if piece.position.z > 15.0 or piece.position.y < -5.0:
@@ -433,6 +440,40 @@ func _spawn_piece(kind: StringName) -> void:
             piece.position = Vector3(-4.0, 1.5, -48.0)
             piece.set_meta("lateral_speed", 1.7)
             piece.set_meta("spin", Vector3(0.3, 0.7, 1.2))
+        &"right_slash":
+            for offset in [-0.65, 0.0, 0.65]:
+                var slash := _beam_between(piece, Vector3(-3.6 + offset, 1.4, 0), Vector3(3.2 + offset, 7.8, 0), 0.09, Color(1.0, 0.05, 0.1))
+                _set_emission(slash, Color(1.0, 0.03, 0.08), 7.0)
+            piece.position = Vector3(2.6, 0.0, -35.0)
+            piece.set_meta("lateral_speed", -2.8)
+            piece.set_meta("speed_scale", 1.65)
+            piece.set_meta("life", 0.85)
+        &"overhead":
+            var overhead := _beam_between(piece, Vector3(-1.8, 8.8, 0), Vector3(1.8, 0.8, 0), 0.13, Color(1.0, 0.58, 0.08))
+            _set_emission(overhead, Color(1.0, 0.4, 0.04), 8.0)
+            var overhead_core := _beam_between(piece, Vector3(-1.8, 8.8, 0.08), Vector3(1.8, 0.8, 0.08), 0.045, Color.WHITE)
+            _set_emission(overhead_core, Color(1.0, 0.9, 0.62), 10.0)
+            piece.position = Vector3(0.0, 0.0, -34.0)
+            piece.set_meta("speed_scale", 1.55)
+            piece.set_meta("life", 0.85)
+        &"energy":
+            var blast := _sphere(0.42, Color(0.3, 1.0, 0.12), Vector3.ZERO, piece, 24, 16)
+            _set_emission(blast, Color(0.2, 1.0, 0.08), 9.0)
+            var blast_ring := _torus(0.68, 0.06, Color(0.7, 1.0, 0.28), Vector3.ZERO, piece)
+            blast_ring.rotation.x = PI * 0.5
+            _set_emission(blast_ring, Color(0.4, 1.0, 0.12), 8.0)
+            piece.position = Vector3(0.0, 5.5, -34.0)
+            piece.set_meta("speed_scale", 1.75)
+            piece.set_meta("life", 0.48)
+        &"counter":
+            var lock_ring := _torus(2.1, 0.1, Color(0.08, 0.78, 1.0), Vector3.ZERO, piece)
+            lock_ring.rotation.x = PI * 0.5
+            _set_emission(lock_ring, Color(0.05, 0.72, 1.0), 7.0)
+            var lock_core := _sphere(0.28, Color.WHITE, Vector3.ZERO, piece, 16, 10)
+            _set_emission(lock_core, Color(0.25, 0.88, 1.0), 8.0)
+            piece.position = Vector3(0.0, 5.7, -17.2)
+            piece.set_meta("speed_scale", 0.0)
+            piece.set_meta("life", 2.8)
         &"shockwave", &"ground_wave":
             _make_shockwave(piece, kind == &"ground_wave")
             piece.position.y = 0.2 if kind == &"ground_wave" else 2.8
@@ -593,7 +634,6 @@ func _pulse_boss(kind: StringName) -> void:
     _boss_reaction_offset = Vector3.ZERO
     _boss_reaction_rotation = Vector3.ZERO
     if kind == &"energy":
-        _spawn_piece(&"shockwave")
         _boss_reaction_offset = Vector3(0, 0, 1.2)
     elif kind == &"right_slash":
         _boss_reaction_rotation.z = -0.32

@@ -1,0 +1,19 @@
+name: spiderman-game-gdg
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "pytest"]
+
+  vision-sim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "vision.main", "--simulate"]
+    profiles: ["vision"]
+    ports:
+      - "127.0.0.1:42420:42420/udp"
+      - "127.0.0.1:42421:42421/udp"
+    restart: unless-stopped

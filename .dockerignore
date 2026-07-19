@@ -1,0 +1,16 @@
+.git
+.github
+.agents
+.codex
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+artifacts
+Build
+data
+game
+logs
+*.docx
+*.pyc
+config/local.yaml

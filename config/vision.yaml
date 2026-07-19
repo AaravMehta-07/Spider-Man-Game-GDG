@@ -9,7 +9,7 @@ calibration:
   crouch_threshold: 0.12
   dodge_velocity_threshold: 0.85
 gestures:
-  trigger_hold_ms: 80
+  trigger_hold_ms: 30
   trigger_release_ms: 70
   pull_threshold: 0.16
   double_web_hold_ms: 220

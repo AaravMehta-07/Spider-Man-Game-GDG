@@ -46,6 +46,8 @@ var _capture_real_started_ms := 0
 var _fps_samples := PackedFloat32Array()
 var _low_fps_elapsed := 0.0
 var _shot_feedback_time := 0.0
+var _web_trail_left_time := 0.0
+var _web_trail_right_time := 0.0
 var _vision_command_peer := PacketPeerUDP.new()
 
 const PACKET_TIMEOUT_MS := 600
@@ -143,6 +145,8 @@ func _process(delta: float) -> void:
     _capture_due_frames()
     _impact_label_time = maxf(0.0, _impact_label_time - delta * session.time_scale)
     _shot_feedback_time = maxf(0.0, _shot_feedback_time - delta * session.time_scale)
+    _web_trail_left_time = maxf(0.0, _web_trail_left_time - delta)
+    _web_trail_right_time = maxf(0.0, _web_trail_right_time - delta)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -359,7 +363,11 @@ func _update_gameplay(delta: float) -> void:
     var right_trigger := bool(actions.get("web_right_trigger", false))
     var shot_count := int(left_trigger) + int(right_trigger)
     if shot_count > 0:
-        _shot_feedback_time = 0.75
+        _shot_feedback_time = 0.9
+        if left_trigger:
+            _web_trail_left_time = 0.65
+        if right_trigger:
+            _web_trail_right_time = 0.65
         audio.play_effect("web_fire")
         if session.state == SessionController.CHASE:
             chase.register_web_shot()
@@ -410,8 +418,8 @@ func _update_presentation(delta: float) -> void:
     hud.web_pressure = web_pressure
     hud.boss_health = boss.health
     hud.tension = boss.tension
-    hud.web_left = bool(actions.get("web_left", false))
-    hud.web_right = bool(actions.get("web_right", false))
+    hud.web_left = bool(actions.get("web_left", false)) or _web_trail_left_time > 0.0
+    hud.web_right = bool(actions.get("web_right", false)) or _web_trail_right_time > 0.0
     hud.aim = aim
     hud.packet_rate = vision.packet_rate
     hud.fps = Engine.get_frames_per_second()
@@ -513,6 +521,7 @@ func _on_boss_attack(kind: StringName, prompt: String, direction: StringName) ->
     hud.instruction_hint = str(INSTRUCTION_HINTS.get(kind, "FOLLOW THE ACTION PROMPT"))
     hud.danger_direction = direction
     city.play_set_piece(kind)
+    hud.show_boss_attack(kind)
     audio.play_effect("spider_sense")
 
 
@@ -721,6 +730,8 @@ func _reset_run() -> void:
     _impact_label = ""
     _impact_label_time = 0.0
     _shot_feedback_time = 0.0
+    _web_trail_left_time = 0.0
+    _web_trail_right_time = 0.0
     chase.reset()
     boss.reset()
     city.reset_dynamic_objects()

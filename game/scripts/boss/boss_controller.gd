@@ -133,7 +133,7 @@ func register_web_shot(elapsed: float, aim: Vector2, shot_count: int, assist: fl
 
 static func boss_target_locked(aim: Vector2, assist: float = 0.0) -> bool:
     var center := Vector2(0.5, 0.43)
-    var radius := Vector2(0.17, 0.23) + Vector2.ONE * clampf(assist, 0.0, 1.0) * 0.05
+    var radius := Vector2(0.22, 0.27) + Vector2.ONE * clampf(assist, 0.0, 1.0) * 0.06
     var offset := aim - center
     return absf(offset.x) <= radius.x and absf(offset.y) <= radius.y
 

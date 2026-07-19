@@ -45,6 +45,19 @@ def classic_spider_hand() -> list[Point]:
     return points
 
 
+def rotate_hand(points: list[Point]) -> list[Point]:
+    wrist = points[0]
+    return [
+        Point(
+            wrist.x - (point.y - wrist.y),
+            wrist.y + (point.x - wrist.x),
+            point.z,
+            point.visibility,
+        )
+        for point in points
+    ]
+
+
 def pinch_hand() -> list[Point]:
     points = open_hand()
     points[4].x = points[8].x
@@ -116,6 +129,30 @@ def test_classic_index_and_pinky_spider_pose_is_recognized() -> None:
     assert action.trigger and action.held and action.gesture == "SPIDER_POSE"
 
 
+def test_rotated_classic_pose_still_fires() -> None:
+    points = classic_spider_hand()
+    points[0] = Point(0.5, 0.75)
+    points[9] = Point(0.5, 0.55)
+    rotated = rotate_hand(points)
+    assert is_web_pose(rotated)
+    classifier = WebGestureClassifier(trigger_hold=0.05)
+    assert not classifier.classify(rotated, 0.0).trigger
+    assert classifier.classify(rotated, 0.05).trigger
+
+
+def test_sideways_splayed_pinky_still_counts_as_classic_pose() -> None:
+    points = classic_spider_hand()
+    points[0] = Point(0.5, 0.75)
+    points[5] = Point(0.4, 0.56)
+    points[6] = Point(0.4, 0.42)
+    points[8] = Point(0.4, 0.2)
+    points[9] = Point(0.5, 0.55)
+    points[17] = Point(0.65, 0.6)
+    points[18] = Point(0.72, 0.5)
+    points[20] = Point(0.89, 0.5)
+    assert is_web_pose(points)
+
+
 def test_open_palm_is_explicit_not_an_unknown_hand_shape() -> None:
     assert is_open_palm(open_hand())
     assert not is_open_palm(fist_hand())
@@ -161,9 +198,7 @@ def test_pull_strength_is_frame_rate_independent() -> None:
         classifier.classify(classic_spider_hand(), 0.0)
         classifier.classify(classic_spider_hand(), 0.08)
         elapsed = 1.0 / fps
-        strengths.append(
-            classifier.classify(fist_hand(0.5 + 0.3 * elapsed), 0.08 + elapsed).pull
-        )
+        strengths.append(classifier.classify(fist_hand(0.5 + 0.3 * elapsed), 0.08 + elapsed).pull)
     assert max(strengths) - min(strengths) < 0.01
     assert min(strengths) > 0.8
 

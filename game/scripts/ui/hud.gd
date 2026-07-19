@@ -49,6 +49,9 @@ var web_left := false
 var web_right := false
 var aim := Vector2(0.5, 0.5)
 var danger_direction: StringName = &"center"
+var boss_attack_kind: StringName = &""
+var boss_attack_time := 0.0
+var boss_attack_duration := 1.4
 var impact_label := ""
 var toast := ""
 var toast_time := 0.0
@@ -82,6 +85,9 @@ var gdg_logo_stacked: Texture2D = preload("res://assets/branding/gdg/gdg_logo.pn
 
 func _process(delta: float) -> void:
     flash = maxf(0.0, flash - delta * 2.2)
+    boss_attack_time = maxf(0.0, boss_attack_time - delta)
+    if boss_attack_time <= 0.0:
+        boss_attack_kind = &""
     if not toast.is_empty() and toast_time <= 0.0:
         toast_time = 2.0
     toast_time = maxf(0.0, toast_time - delta)
@@ -98,6 +104,7 @@ func _draw() -> void:
         _draw_results(viewport_size)
     else:
         _draw_vignette(viewport_size)
+        _draw_boss_attack(viewport_size)
         _draw_status(viewport_size)
         _draw_context(viewport_size)
         _draw_reticle(viewport_size)
@@ -120,6 +127,50 @@ func _draw() -> void:
     if flash > 0.0:
         draw_rect(Rect2(Vector2.ZERO, viewport_size), Color(1.0, 0.05, 0.12, flash * 0.22))
 
+
+func show_boss_attack(kind: StringName) -> void:
+    boss_attack_kind = kind
+    boss_attack_duration = 1.8 if kind in [&"debris", &"ground_wave"] else 1.4
+    boss_attack_time = boss_attack_duration
+
+
+func _draw_boss_attack(viewport_size: Vector2) -> void:
+    if boss_attack_time <= 0.0 or boss_attack_kind.is_empty():
+        return
+    var progress := 1.0 - boss_attack_time / maxf(0.01, boss_attack_duration)
+    var fade := clampf(boss_attack_time / 0.32, 0.0, 1.0)
+    var center := Vector2(viewport_size.x * 0.5, viewport_size.y * 0.43)
+    match boss_attack_kind:
+        &"right_slash":
+            for index in range(3):
+                var offset := Vector2(index * 34.0, -index * 18.0)
+                var start := Vector2(viewport_size.x * 0.78, viewport_size.y * 0.16) + offset
+                var finish := Vector2(viewport_size.x * 0.34, viewport_size.y * 0.72) + offset
+                draw_line(start.lerp(finish, progress * 0.18), start.lerp(finish, minf(1.0, progress + 0.42)), Color(1.0, 0.06, 0.12, fade * 0.88), 10.0, true)
+                draw_line(start, finish, Color(1.0, 0.55, 0.22, fade * 0.28), 24.0, true)
+        &"overhead":
+            var blade_x := center.x + sin(progress * PI) * 34.0
+            draw_line(Vector2(blade_x, 80), Vector2(blade_x, viewport_size.y * 0.7), Color(1.0, 0.65, 0.12, fade * 0.9), 13.0, true)
+            draw_line(Vector2(blade_x, 80), Vector2(blade_x, viewport_size.y * 0.7), Color.WHITE, 3.0, true)
+        &"energy":
+            for ring in range(4):
+                var radius := 28.0 + progress * 105.0 + ring * 15.0
+                draw_arc(center, radius, 0.0, TAU, 48, Color(0.38, 1.0, 0.18, fade * (0.68 - ring * 0.1)), 7.0, true)
+        &"counter":
+            var pulse := 58.0 + sin(Time.get_ticks_msec() * 0.02) * 10.0
+            draw_arc(center, pulse, 0.0, TAU, 40, Color(0.18, 0.88, 1.0, fade), 6.0, true)
+            draw_line(center - Vector2(95, 0), center - Vector2(30, 0), Color(0.18, 0.88, 1.0, fade), 4.0, true)
+            draw_line(center + Vector2(30, 0), center + Vector2(95, 0), Color(0.18, 0.88, 1.0, fade), 4.0, true)
+        &"debris":
+            for index in range(7):
+                var start := Vector2(viewport_size.x * (0.68 + index * 0.025), 150.0 - index * 18.0)
+                var finish := Vector2(viewport_size.x * (0.38 + index * 0.035), viewport_size.y * 0.76)
+                var point := start.lerp(finish, clampf(progress * 1.35 - index * 0.035, 0.0, 1.0))
+                draw_rect(Rect2(point - Vector2(13, 9), Vector2(26, 18)), Color(0.9, 0.42, 0.12, fade * 0.86), true)
+        &"ground_wave":
+            var wave_center := Vector2(center.x, viewport_size.y * 0.91)
+            for ring in range(3):
+                draw_arc(wave_center, 90.0 + progress * 460.0 + ring * 42.0, PI, TAU, 48, Color(0.55, 1.0, 0.2, fade * (0.8 - ring * 0.16)), 9.0, true)
 
 func _draw_vignette(viewport_size: Vector2) -> void:
     draw_rect(Rect2(0, 0, viewport_size.x, 5), Color(0.12, 0.82, 1.0, 0.88))
@@ -504,7 +555,7 @@ func _draw_operator(viewport_size: Vector2) -> void:
         _operator_row(rect, 255, "Crouch sensitivity", "0.120", "YAML")
         _operator_row(rect, 305, "Dodge sensitivity", "0.850", "YAML")
         _operator_row(rect, 355, "Web trigger", "CLASSIC WEB POSE + RELEASE", "AUTO")
-        _operator_row(rect, 405, "Web threshold", "80 ms", "YAML")
+        _operator_row(rect, 405, "Web threshold", "30 ms", "YAML")
         _operator_row(rect, 455, "Aim smoothing", "32%", "YAML")
         _operator_row(rect, 505, "Web endurance assist", "%d%% ADAPTIVE" % int(assist_level * 100.0), "AUTO")
         _operator_row(rect, 555, "Pull sensitivity", "0.160", "YAML")

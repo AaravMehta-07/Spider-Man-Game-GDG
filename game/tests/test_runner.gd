@@ -194,6 +194,7 @@ func _test_boss_counter() -> void:
 func _test_boss_free_fire_and_target_lock() -> void:
     var controller = preload("res://scripts/boss/boss_controller.gd").new()
     _expect(controller.boss_target_locked(Vector2(0.5, 0.43)), "centered two-hand aim locks the boss")
+    _expect(controller.boss_target_locked(Vector2(0.71, 0.68)), "visible boss bounds remain hittable")
     _expect(not controller.boss_target_locked(Vector2(0.05, 0.9)), "off-target aim does not lock the boss")
     var health_before: float = controller.health
     _expect(controller.register_web_shot(60.0, Vector2(0.5, 0.43), 1, 0.0), "locked web shot hits outside a counter window")
