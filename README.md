@@ -64,9 +64,13 @@ Docker provides a repeatable environment for the automated tests and the
 simulated Python vision service:
 
 ```powershell
+git clone https://github.com/AaravMehta-07/Spider-Man-Game-GDG.git
+cd Spider-Man-Game-GDG
+docker compose build test
 docker compose run --rm test
-docker compose --profile vision up vision-sim
 ```
+
+For the optional simulator, run docker compose --profile vision up vision-sim.
 
 The public event game itself should still be run natively with `python main.py`.
 The Godot window needs direct desktop, GPU, audio, and webcam access, which is not

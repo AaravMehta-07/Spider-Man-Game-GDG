@@ -18,6 +18,10 @@ var enabled := true
 var listening := false
 var listen_error := OK
 var _reported_first_packet := false
+var _pending_dodge_left := false
+var _pending_dodge_right := false
+var _pending_web_left_trigger := false
+var _pending_web_right_trigger := false
 
 
 func _ready() -> void:
@@ -28,6 +32,7 @@ func _ready() -> void:
 func start_listening(port: int) -> int:
     peer.close()
     peer = PacketPeerUDP.new()
+    _clear_transient_actions()
     # Godot 4.7.1 on Windows can reject an IPv4 loopback-only bind with
     # ERR_UNAVAILABLE. Bind IPv4-any, then enforce loopback per packet.
     listen_error = peer.bind(port, "0.0.0.0")
@@ -79,6 +84,7 @@ func _accept_packet(packet: PackedByteArray) -> void:
                 retired_session_ids.pop_front()
         latest_session_id = session_id
         latest_sequence = -1
+        _clear_transient_actions()
     var sequence := int(data.get("sequence", -1))
     if sequence < 0 or sequence <= latest_sequence:
         return
@@ -100,6 +106,10 @@ func _accept_packet(packet: PackedByteArray) -> void:
     for key in ["aim_x", "aim_y", "aim_left_x", "aim_left_y", "aim_right_x", "aim_right_y", "pull", "two_hand_pull", "pose_confidence", "hand_confidence"]:
         data[key] = clampf(float(data.get(key, 0.0)), 0.0, 1.0)
     data["hand_count"] = clampi(int(hand_count), 0, 2)
+    _pending_dodge_left = _pending_dodge_left or bool(data.get("dodge_left", false))
+    _pending_dodge_right = _pending_dodge_right or bool(data.get("dodge_right", false))
+    _pending_web_left_trigger = _pending_web_left_trigger or bool(data.get("web_left_trigger", false))
+    _pending_web_right_trigger = _pending_web_right_trigger or bool(data.get("web_right_trigger", false))
     latest_sequence = sequence
     latest = data
     last_packet_ms = Time.get_ticks_msec()
@@ -108,6 +118,24 @@ func _accept_packet(packet: PackedByteArray) -> void:
 
 func is_fresh(max_age_ms: int = 350) -> bool:
     return last_packet_ms >= 0 and Time.get_ticks_msec() - last_packet_ms < max_age_ms
+
+
+func consume_transient_actions() -> Dictionary:
+    var result := {
+        "dodge_left": _pending_dodge_left,
+        "dodge_right": _pending_dodge_right,
+        "web_left_trigger": _pending_web_left_trigger,
+        "web_right_trigger": _pending_web_right_trigger,
+    }
+    _clear_transient_actions()
+    return result
+
+
+func _clear_transient_actions() -> void:
+    _pending_dodge_left = false
+    _pending_dodge_right = false
+    _pending_web_left_trigger = false
+    _pending_web_right_trigger = false
 
 
 func _exit_tree() -> void:

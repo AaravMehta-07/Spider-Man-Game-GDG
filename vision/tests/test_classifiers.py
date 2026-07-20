@@ -214,13 +214,22 @@ def test_missing_hand_resets_attachment_and_fist_does_not_shoot() -> None:
     assert action.gesture == "FIST"
 
 
-def test_brief_or_interrupted_spider_pose_never_fires() -> None:
+def test_single_noisy_frame_does_not_cancel_a_deliberate_web_pose() -> None:
     classifier = WebGestureClassifier(trigger_hold=0.08)
     assert not classifier.classify(classic_spider_hand(), 0.0).trigger
     assert not classifier.classify(classic_spider_hand(), 0.04).trigger
     assert not classifier.classify(open_hand(), 0.05).trigger
-    assert not classifier.classify(classic_spider_hand(), 0.10).trigger
-    assert classifier.classify(classic_spider_hand(), 0.18).trigger
+    assert classifier.classify(classic_spider_hand(), 0.10).trigger
+    assert not classifier.classify(classic_spider_hand(), 0.18).trigger
+
+
+def test_long_pose_interruption_restarts_acquisition() -> None:
+    classifier = WebGestureClassifier(trigger_hold=0.08, acquisition_grace=0.1)
+    assert not classifier.classify(classic_spider_hand(), 0.0).trigger
+    assert not classifier.classify(open_hand(), 0.02).trigger
+    assert not classifier.classify(open_hand(), 0.13).trigger
+    assert not classifier.classify(classic_spider_hand(), 0.14).trigger
+    assert classifier.classify(classic_spider_hand(), 0.22).trigger
 
 
 def test_aiming_shapes_never_fire_or_consume_web() -> None:

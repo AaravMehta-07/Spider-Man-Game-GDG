@@ -105,9 +105,12 @@ def is_web_pose(points: Sequence[HandLandmark]) -> bool:
     # Directional extension works with a rotated hand while rejecting a fist,
     # pinch, or single pointing finger.
     index_extended = _points_outward(points, 8, 6)
-    middle_ring_curled = _curled(points, 12, 10) and _curled(points, 16, 14)
+    middle_ring_folded = (
+        (_curled(points, 12, 10) or not _points_outward(points, 12, 10))
+        and (_curled(points, 16, 14) or not _points_outward(points, 16, 14))
+    )
     pinky_extended = _points_outward(points, 20, 18)
-    return index_extended and pinky_extended and middle_ring_curled
+    return index_extended and pinky_extended and middle_ring_folded
 
 
 def is_pinching(points: Sequence[HandLandmark], threshold: float | None = None) -> bool:

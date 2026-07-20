@@ -11,6 +11,7 @@ func _init() -> void:
     _test_large_delta_preserves_state_side_effects()
     _test_one_hundred_session_resets()
     _test_chase_actions()
+    _test_chase_miss_collision_classification()
     _test_perfect_chase_web_accuracy()
     _test_chase_schedule_has_no_overlap()
     _test_city_obstacles_and_scoring()
@@ -93,12 +94,26 @@ func _test_one_hundred_session_resets() -> void:
 
 func _test_chase_actions() -> void:
     var director = preload("res://scripts/chase/chase_director.gd").new()
-    director.update(12.0, {"dodge_left": true, "move": -1.0})
+    director.update(12.0, {"move": -0.6})
     _expect(director.index == 1, "correct dodge resolves first chase event")
     _expect(director.perfect_dodges == 1, "perfect dodge is counted")
     director.update(16.0, {"web_left": true})
     _expect(director.index == 2, "web shot resolves drone event")
     _expect(director.web_hits == 1, "web hit is counted")
+    director.free()
+
+
+func _test_chase_miss_collision_classification() -> void:
+    var director = preload("res://scripts/chase/chase_director.gd").new()
+    var collision_flags: Array[bool] = []
+    director.challenge_missed.connect(func(_damage: float, collision: bool): collision_flags.append(collision))
+    for deadline in [12.5, 15.2, 18.2, 22.5, 26.4, 30.8, 36.0, 40.9, 45.8, 51.2]:
+        director.update(deadline, {})
+    _expect(collision_flags.count(true) == 4, "stationary play misses all four physical obstacles")
+    _expect(collision_flags.count(false) == 6, "six non-collision objectives never add collision strikes")
+    _expect(ChaseDirector.counts_as_collision(&"crane"), "incoming crane is classified as a collision")
+    _expect(not ChaseDirector.counts_as_collision(&"rescue"), "missed rescue is not classified as a collision")
+    _expect(not ChaseDirector.counts_as_collision(&"shockwave"), "missed shield objective is not classified as a collision")
     director.free()
 
 
@@ -165,6 +180,7 @@ func _test_every_chase_kind_has_visual_geometry() -> void:
         city._spawn_piece(kind)
         var piece: Node3D = city._set_pieces.back()
         _expect(piece.get_child_count() > 0, "%s chase set piece has visible geometry" % kind)
+        _expect(piece.find_child("HazardGlow", true, false) is OmniLight3D, "%s hazard has visibility glow" % kind)
         city.reset_dynamic_objects()
     city.free()
 
@@ -184,7 +200,7 @@ func _test_green_goblin_assets() -> void:
 
 func _test_boss_counter() -> void:
     var controller = preload("res://scripts/boss/boss_controller.gd").new()
-    controller.update(58.8, 0.1, {"dodge_left": true, "move": -1.0})
+    controller.update(58.8, 0.1, {"move": -0.6})
     _expect(controller.index == 1, "boss defense advances on correct response")
     _expect(controller.health < 100.0, "boss is revealed and damaged after counter")
     _expect(controller.successful_counters == 1, "boss counter is recorded")
@@ -226,6 +242,15 @@ func _test_udp_sequence_deduplication() -> void:
     receiver._accept_packet(current)
     _expect(receiver.latest_sequence == 9, "newer input sequence is accepted")
     _expect(receiver.is_fresh(), "accepted packet refreshes heartbeat age")
+    var pulse := JSON.stringify({"v": 1, "kind": "input", "data": {"session_id": "initial", "sequence": 10, "tracked": true, "hand_count": 1, "dodge_left": true, "web_left_trigger": true}}).to_utf8_buffer()
+    var settled := JSON.stringify({"v": 1, "kind": "input", "data": {"session_id": "initial", "sequence": 11, "tracked": false, "hand_count": 0}}).to_utf8_buffer()
+    receiver._accept_packet(pulse)
+    receiver._accept_packet(settled)
+    var transients := receiver.consume_transient_actions()
+    _expect(bool(transients.dodge_left), "a quick dodge survives a newer neutral UDP packet")
+    _expect(bool(transients.web_left_trigger), "a web shot survives a newer neutral UDP packet")
+    var consumed := receiver.consume_transient_actions()
+    _expect(not bool(consumed.dodge_left) and not bool(consumed.web_left_trigger), "transient inputs are consumed exactly once")
     var old_session := JSON.stringify({"v": 1, "kind": "input", "data": {"session_id": "old", "sequence": 100, "move": -0.5}}).to_utf8_buffer()
     var restarted_session := JSON.stringify({"v": 1, "kind": "input", "data": {"session_id": "new", "sequence": 1, "move": 0.5}}).to_utf8_buffer()
     receiver._accept_packet(old_session)
@@ -294,8 +319,8 @@ func _test_camera_start_policy() -> void:
 
 func _test_collision_failure_policy() -> void:
     var main_script = preload("res://scripts/core/main.gd")
-    _expect(not main_script.collision_limit_reached(2), "two obstacle collisions do not fail the run")
-    _expect(main_script.collision_limit_reached(3), "three obstacle collisions fail the run")
+    _expect(not main_script.collision_limit_reached(2), "two genuine obstacle collisions still allow the player to finish")
+    _expect(main_script.collision_limit_reached(3), "three genuine obstacle collisions fail the run")
     _expect(main_script.collision_limit_reached(1, 1), "collision limit remains configurable and deterministic")
 
 

@@ -1,6 +1,25 @@
 class_name CityBuilder
 extends Node3D
 
+const HAZARD_GLOW_COLORS := {
+    &"billboard": Color(1.0, 0.12, 0.08),
+    &"drone": Color(0.1, 0.78, 1.0),
+    &"vent": Color(1.0, 0.58, 0.12),
+    &"barrier": Color(1.0, 0.52, 0.08),
+    &"scaffold": Color(1.0, 0.48, 0.1),
+    &"swing": Color(0.08, 0.72, 1.0),
+    &"rescue": Color(1.0, 0.72, 0.18),
+    &"crane": Color(1.0, 0.7, 0.08),
+    &"shockwave": Color(0.18, 0.78, 1.0),
+    &"collapse": Color(1.0, 0.38, 0.08),
+    &"car": Color(1.0, 0.48, 0.08),
+    &"bicycle": Color(1.0, 0.62, 0.12),
+    &"dumpster": Color(0.2, 1.0, 0.55),
+    &"lamp_post": Color(1.0, 0.74, 0.22),
+    &"traffic_light": Color(1.0, 0.18, 0.08),
+    &"debris": Color(0.58, 1.0, 0.18),
+}
+
 var speed := 24.0
 var mission_state: StringName = &"ATTRACT"
 var player_lane := 0.0
@@ -484,7 +503,36 @@ func _spawn_piece(kind: StringName) -> void:
             piece.position = Vector3(2.5, 5.7, -39.0)
             piece.set_meta("lateral_speed", -1.0)
             piece.set_meta("spin", Vector3(1.8, 1.2, 2.5))
+    _apply_hazard_visibility(piece, kind)
     _set_pieces.append(piece)
+
+
+func _apply_hazard_visibility(piece: Node3D, kind: StringName) -> void:
+    if not HAZARD_GLOW_COLORS.has(kind):
+        return
+    var glow: Color = HAZARD_GLOW_COLORS[kind]
+    _brighten_hazard_meshes(piece, glow)
+    var visibility_light := OmniLight3D.new()
+    visibility_light.name = "HazardGlow"
+    visibility_light.light_color = glow
+    visibility_light.light_energy = 1.15
+    visibility_light.omni_range = 9.0
+    visibility_light.shadow_enabled = false
+    visibility_light.position = Vector3(0.0, 3.0, 1.5)
+    piece.add_child(visibility_light)
+
+
+func _brighten_hazard_meshes(node: Node, glow: Color) -> void:
+    for child in node.get_children():
+        if child is MeshInstance3D:
+            var mesh_instance := child as MeshInstance3D
+            var material := mesh_instance.material_override as StandardMaterial3D
+            if material != null:
+                material.albedo_color = material.albedo_color.lightened(0.12)
+                material.emission_enabled = true
+                material.emission = material.albedo_color.lerp(glow, 0.28)
+                material.emission_energy_multiplier = maxf(material.emission_energy_multiplier, 1.45)
+        _brighten_hazard_meshes(child, glow)
 
 
 func _make_car(parent: Node3D, paint: Color, airborne: bool) -> void:

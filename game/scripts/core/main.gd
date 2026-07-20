@@ -124,7 +124,7 @@ func _connect_systems() -> void:
     session.session_finished.connect(_on_session_finished)
     chase.challenge_started.connect(_on_challenge_started)
     chase.challenge_cleared.connect(_on_challenge_cleared)
-    chase.challenge_missed.connect(_on_obstacle_hit)
+    chase.challenge_missed.connect(_on_chase_missed)
     boss.attack_started.connect(_on_boss_attack)
     boss.counter_success.connect(_on_boss_counter)
     boss.player_hit.connect(_on_boss_hit)
@@ -258,6 +258,7 @@ func _read_input(delta: float) -> void:
     if not capture_mode:
         packet_timeout = PACKET_TIMEOUT_MS
     var fresh := vision.is_fresh(packet_timeout)
+    var transient_actions := vision.consume_transient_actions()
     actions = _keyboard_actions()
     aim = _mouse_aim()
     if fresh and not keyboard_only:
@@ -267,13 +268,16 @@ func _read_input(delta: float) -> void:
         _player_tracked = tracked
         if tracked:
             actions.move = float(data.get("move", 0.0))
-            for key in ["jump", "crouch", "dodge_left", "dodge_right", "shield"]:
+            for key in ["jump", "crouch", "shield"]:
                 actions[key] = bool(actions[key]) or bool(data.get(key, false))
-        if _hand_count > 0:
+        actions.dodge_left = bool(actions.dodge_left) or bool(transient_actions.dodge_left)
+        actions.dodge_right = bool(actions.dodge_right) or bool(transient_actions.dodge_right)
+        var has_web_pulse := bool(transient_actions.web_left_trigger) or bool(transient_actions.web_right_trigger)
+        if _hand_count > 0 or has_web_pulse:
             actions.web_left = bool(actions.web_left) or bool(data.get("web_left", false))
             actions.web_right = bool(actions.web_right) or bool(data.get("web_right", false))
-            actions.web_left_trigger = bool(actions.web_left_trigger) or bool(data.get("web_left_trigger", false))
-            actions.web_right_trigger = bool(actions.web_right_trigger) or bool(data.get("web_right_trigger", false))
+            actions.web_left_trigger = bool(actions.web_left_trigger) or bool(transient_actions.web_left_trigger)
+            actions.web_right_trigger = bool(actions.web_right_trigger) or bool(transient_actions.web_right_trigger)
             actions.fist_left = bool(data.get("fist_left", false))
             actions.fist_right = bool(data.get("fist_right", false))
             actions.palm_open_left = bool(data.get("palm_open_left", false))
@@ -534,14 +538,17 @@ func _on_boss_counter(points: int, label: String) -> void:
     _clear_context_prompt()
 
 
-func _on_obstacle_hit(damage: float) -> void:
-    collision_strikes = mini(MAX_COLLISION_STRIKES, collision_strikes + 1)
-    print("CHASE MISS  strike=%d/%d  |  %.2fs" % [collision_strikes, MAX_COLLISION_STRIKES, session.elapsed])
-    if collision_limit_reached(collision_strikes) and not mission_failed:
-        mission_failed = true
-        combo = 1
-        hud.toast = "MISSION FAILED  |  TOO MANY COLLISIONS"
-        hud.toast_time = 4.0
+func _on_chase_missed(damage: float, counts_as_collision: bool) -> void:
+    if counts_as_collision:
+        collision_strikes = mini(MAX_COLLISION_STRIKES, collision_strikes + 1)
+        print("OBSTACLE COLLISION  strike=%d/%d  |  %.2fs" % [collision_strikes, MAX_COLLISION_STRIKES, session.elapsed])
+        if collision_limit_reached(collision_strikes) and not mission_failed:
+            mission_failed = true
+            combo = 1
+            hud.toast = "MISSION FAILED  |  TOO MANY COLLISIONS"
+            hud.toast_time = 4.0
+    else:
+        print("CHASE OBJECTIVE MISSED  |  %.2fs" % session.elapsed)
     _apply_damage(maxf(24.0, damage))
 
 

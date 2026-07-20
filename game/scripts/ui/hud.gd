@@ -76,11 +76,10 @@ var leaderboard: Array = []
 var daily_rank := 0
 var attract_background: Texture2D = preload("res://assets/generated/attract_city.png")
 var hero_emblem: Texture2D = preload("res://assets/branding/hero_emblem.png")
-var recruitment_qr: Texture2D = preload("res://assets/branding/recruitment_qr.png")
-var recruitment_qr_ready := FileAccess.file_exists("res://assets/branding/recruitment_qr.ready")
+
 var hud_font: Font = preload("res://assets/fonts/Oxanium.ttf")
 var gdg_logo_horizontal: Texture2D = preload("res://assets/branding/gdg/gdg_logo_horizontal.png")
-var gdg_logo_stacked: Texture2D = preload("res://assets/branding/gdg/gdg_logo.png")
+
 
 
 func _process(delta: float) -> void:
@@ -469,7 +468,6 @@ func _draw_results(viewport_size: Vector2) -> void:
         _text(rows[index], Vector2(viewport_size.x * 0.5 - 320, 328 + index * 42), 23, Color.WHITE)
     _text_center("RUN DISQUALIFIED" if mission_failed else _rank_label(), Vector2(viewport_size.x * 0.5, 700), 31, Color(1.0, 0.52, 0.22) if mission_failed else Color(0.2, 0.88, 1.0))
     _text_center("TOO MANY COLLISIONS. TRY AGAIN." if mission_failed else "YOU MASTERED THE WEB.", Vector2(viewport_size.x * 0.5, 805), 25, Color.WHITE)
-    _text_center("NOW BUILD THE TECHNOLOGY BEHIND IT.", Vector2(viewport_size.x * 0.5, 850), 22, Color(0.48, 0.96, 0.28))
     _panel(Rect2(70, 310, 400, 330), Color(0.01, 0.02, 0.055, 0.94))
     _text("TOP FIVE TODAY", Vector2(105, 355), 21, Color(0.1, 0.75, 1.0))
     for index in mini(5, leaderboard.size()):
@@ -478,21 +476,7 @@ func _draw_results(viewport_size: Vector2) -> void:
         _text("%06d" % int(entry.get("score", 0)), Vector2(360, 405 + index * 40), 17, Color(1.0, 0.82, 0.18))
     var rank_text := "NO RANK - RUN FAILED" if mission_failed else "YOUR RANK  #%d" % daily_rank
     _text("PLAYERS TODAY  %d  |  %s" % [leaderboard.size(), rank_text], Vector2(105, 615), 15, Color(0.68, 0.8, 0.92))
-    _panel(Rect2(viewport_size.x - 390, 310, 270, 330), Color(1.0, 1.0, 1.0, 0.96))
-    var recruitment_rect := Rect2(viewport_size.x - 370, 330, 230, 230)
-    if recruitment_qr_ready:
-        draw_texture_rect(recruitment_qr, recruitment_rect, false)
-    else:
-        var logo_size := gdg_logo_stacked.get_size()
-        var logo_scale := minf(recruitment_rect.size.x / logo_size.x, recruitment_rect.size.y / logo_size.y)
-        var contained_size := logo_size * logo_scale
-        draw_texture_rect(
-            gdg_logo_stacked,
-            Rect2(recruitment_rect.position + (recruitment_rect.size - contained_size) * 0.5, contained_size),
-            false
-        )
-    var qr_label := "SCAN TO BUILD THE FUTURE" if recruitment_qr_ready else "GDG ON CAMPUS"
-    _text_center(qr_label, Vector2(viewport_size.x - 255, 605), 15, Color(0.02, 0.04, 0.1))
+
     _text_center("DAILY HIGH  %06d" % high_score, Vector2(viewport_size.x * 0.5, 912), 18, Color(1.0, 0.82, 0.18))
 
 

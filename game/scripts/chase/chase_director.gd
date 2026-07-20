@@ -3,8 +3,11 @@ extends Node
 
 signal challenge_started(kind: StringName, prompt: String, direction: StringName)
 signal challenge_cleared(points: int, label: String)
-signal challenge_missed(damage: float)
+signal challenge_missed(damage: float, counts_as_collision: bool)
 signal set_piece(kind: StringName)
+
+const DODGE_LANE_THRESHOLD := 0.55
+const COLLISION_KINDS := [&"billboard", &"vent", &"scaffold", &"crane"]
 
 const CHALLENGES := [
     {"time": 10.5, "duration": 2.0, "kind": &"billboard", "action": &"dodge_left", "prompt": "BILLBOARD RIGHT  |  DODGE LEFT", "points": 900},
@@ -73,9 +76,17 @@ func update(elapsed: float, actions: Dictionary) -> void:
         return
     var deadline := float(active["time"]) + float(active["duration"])
     if elapsed >= deadline:
-        challenge_missed.emit(10.0 if active["kind"] != &"collapse" else 14.0)
+        var missed_kind: StringName = active["kind"]
+        challenge_missed.emit(
+            10.0 if missed_kind != &"collapse" else 14.0,
+            counts_as_collision(missed_kind)
+        )
         index += 1
         active = {}
+
+
+static func counts_as_collision(kind: StringName) -> bool:
+    return kind in COLLISION_KINDS
 
 
 func register_web_shot() -> void:
@@ -91,9 +102,9 @@ func web_accuracy() -> int:
 func _matches(action: String, input: Dictionary) -> bool:
     match action:
         "dodge_left":
-            return bool(input.get("dodge_left", false)) or float(input.get("move", 0.0)) < -0.72
+            return bool(input.get("dodge_left", false)) or float(input.get("move", 0.0)) < -DODGE_LANE_THRESHOLD
         "dodge_right":
-            return bool(input.get("dodge_right", false)) or float(input.get("move", 0.0)) > 0.72
+            return bool(input.get("dodge_right", false)) or float(input.get("move", 0.0)) > DODGE_LANE_THRESHOLD
         "jump":
             return bool(input.get("jump", false))
         "crouch":

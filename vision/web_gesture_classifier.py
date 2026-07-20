@@ -32,6 +32,7 @@ class WebGestureClassifier:
         pull_velocity: float = 0.35,
         release_grace: float = 0.14,
         trigger_hold: float = 0.08,
+        acquisition_grace: float = 0.12,
     ) -> None:
         self._active = False
         self._last_wrist_y: float | None = None
@@ -39,11 +40,13 @@ class WebGestureClassifier:
         self._missing_frames = 0
         self._last_web_signal = False
         self._web_pose_started: float | None = None
+        self._last_web_pose_seen: float | None = None
         self._release_started: float | None = None
         self._cooldown_until = 0.0
         self.pull_velocity = max(0.05, pull_velocity)
         self.release_grace = max(0.05, release_grace)
         self.trigger_hold = max(0.0, trigger_hold)
+        self.acquisition_grace = max(0.0, acquisition_grace)
 
     def classify(
         self, points: Sequence[HandLandmark], timestamp: float | None = None
@@ -55,9 +58,15 @@ class WebGestureClassifier:
         if web_pose:
             if self._web_pose_started is None:
                 self._web_pose_started = now
+            self._last_web_pose_seen = now
             web_signal = now - self._web_pose_started + 1e-9 >= self.trigger_hold
         else:
-            self._web_pose_started = None
+            if (
+                self._last_web_pose_seen is None
+                or now - self._last_web_pose_seen > self.acquisition_grace
+            ):
+                self._web_pose_started = None
+                self._last_web_pose_seen = None
             web_signal = False
         was_active = self._active
         trigger_candidate = not was_active and web_signal and not self._last_web_signal
@@ -111,5 +120,6 @@ class WebGestureClassifier:
         self._missing_frames = 0
         self._last_web_signal = False
         self._web_pose_started = None
+        self._last_web_pose_seen = None
         self._release_started = None
         self._cooldown_until = 0.0

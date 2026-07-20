@@ -10,6 +10,8 @@ signal boss_health_changed(value: float)
 signal finisher_prompt(value: String)
 signal contained
 
+const DODGE_LANE_THRESHOLD := 0.55
+
 const ATTACKS := [
     {"time": 58.8, "duration": 2.2, "kind": &"right_slash", "action": &"dodge_left", "prompt": "SPIDER-SENSE RIGHT  |  DODGE LEFT"},
     {"time": 62.0, "duration": 2.3, "kind": &"overhead", "action": &"crouch", "prompt": "OVERHEAD STRIKE  |  CROUCH"},
@@ -141,9 +143,9 @@ static func boss_target_locked(aim: Vector2, assist: float = 0.0) -> bool:
 func _matches(action: String, input: Dictionary) -> bool:
     match action:
         "dodge_left":
-            return bool(input.get("dodge_left", false)) or float(input.get("move", 0.0)) < -0.72
+            return bool(input.get("dodge_left", false)) or float(input.get("move", 0.0)) < -DODGE_LANE_THRESHOLD
         "dodge_right":
-            return bool(input.get("dodge_right", false)) or float(input.get("move", 0.0)) > 0.72
+            return bool(input.get("dodge_right", false)) or float(input.get("move", 0.0)) > DODGE_LANE_THRESHOLD
         "jump":
             return bool(input.get("jump", false))
         "crouch":
